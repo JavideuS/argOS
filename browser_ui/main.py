@@ -24,19 +24,19 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, Response
 
-from auth import (
+from core.auth import (
     DASHBOARD_PASSWORD,
     create_session,
     verify_bridge,
     verify_dashboard_password,
     verify_session,
 )
-from models import (
+from core.models import (
     IngestRequest, IngestResponse,
     QueryRequest, MapResponse,
     ErrorResponse, WorldState,
 )
-from world_store import WorldStateStore
+from core.world_store import WorldStateStore
 
 logger = logging.getLogger(__name__)
 
@@ -118,18 +118,24 @@ def _spawn_bridges() -> list:
 
     Each bridge will reconnect on its own if dimos starts late. Failures here
     are logged but never fatal; the dashboard still serves without bridges.
+
+    Bridge stdout/stderr goes to browser_ui/logs/<name>.log so failures are
+    visible without cluttering the main server terminal.
     """
     import subprocess
     import sys
     here = os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.path.join(here, "logs")
+    os.makedirs(log_dir, exist_ok=True)
     procs: list = []
     py = sys.executable
 
     # All bridges talk to dimos via LCM directly — no Socket.IO / command-center.
+    bd = os.path.join(here, "bridges")
     bridge_specs = [
         (
             "camera_bridge",
-            [py, "-u", os.path.join(here, "camera_bridge.py"),
+            [py, "-u", os.path.join(bd, "camera_bridge.py"),
              "--cloud-url", SELF_URL,
              "--fps", str(CAMERA_BRIDGE_FPS),
              "--source", CAMERA_BRIDGE_SOURCE,
@@ -138,28 +144,36 @@ def _spawn_bridges() -> list:
         ),
         (
             "pc_bridge",
-            [py, "-u", os.path.join(here, "pc_bridge.py"),
+            [py, "-u", os.path.join(bd, "pc_bridge.py"),
              "--cloud-url", SELF_URL,
              "--fps", os.environ.get("PC_BRIDGE_FPS", "5")],
         ),
         (
             "nav_bridge",
-            [py, "-u", os.path.join(here, "nav_bridge.py"),
+            [py, "-u", os.path.join(bd, "nav_bridge.py"),
              "--cloud-url", SELF_URL,
              "--pose-hz", os.environ.get("NAV_POSE_HZ", "15"),
              "--goal-hz", os.environ.get("NAV_GOAL_POLL_HZ", "5")],
         ),
+        (
+            "costmap_bridge",
+            [py, "-u", os.path.join(bd, "costmap_bridge.py"),
+             "--cloud-url", SELF_URL,
+             "--ws-url", os.environ.get("DIMOS_WS_URL", "http://localhost:7779")],
+        ),
     ]
     for name, cmd in bridge_specs:
         try:
+            log_path = os.path.join(log_dir, f"{name}.log")
+            log_fh = open(log_path, "a")
             p = subprocess.Popen(
                 cmd,
                 cwd=here,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_fh,
+                stderr=log_fh,
             )
-            procs.append((name, p))
-            logger.info(f"[lifespan] spawned {name} pid={p.pid}")
+            procs.append((name, p, log_fh))
+            logger.info(f"[lifespan] spawned {name} pid={p.pid} log={log_path}")
         except Exception as e:
             logger.warning(f"[lifespan] failed to spawn {name}: {e}")
     return procs
@@ -182,13 +196,20 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # Best-effort cleanup of bridge subprocesses on shutdown.
-        for name, p in app.state.bridge_procs:
+        for entry in app.state.bridge_procs:
+            name, p, *rest = entry
+            fh = rest[0] if rest else None
             try:
                 p.terminate()
                 p.wait(timeout=2)
             except Exception:
                 try:
                     p.kill()
+                except Exception:
+                    pass
+            if fh:
+                try:
+                    fh.close()
                 except Exception:
                     pass
             logger.info(f"[lifespan] stopped {name}")
@@ -372,7 +393,7 @@ def _merge_detected_objects(existing, incoming):
 
 def _stream_mcp_response(text: str, mode: str) -> StreamingResponse:
     """Shared SSE wrapper around the MCP-aware Bedrock agent."""
-    from agent_mcp import run_mcp_agent_stream
+    from core.agent_mcp import run_mcp_agent_stream
 
     def generate():
         try:
@@ -399,34 +420,16 @@ async def query_stream(request: QueryRequest, _tok: str = Depends(verify_session
     spatial-memory queries, …) but NO movement / action tools. If the user
     asks the robot to act, the agent explains and points them to the Agent tab.
     """
-    store: WorldStateStore = app.state.world_store
     use_mcp = os.environ.get("USE_MCP_AGENT", "true").lower() == "true"
 
     if use_mcp:
         try:
             return _stream_mcp_response(request.text, mode="ask")
         except ImportError as e:
-            logger.warning(f"MCP agent unavailable, using fallback: {e}")
-
-    try:
-        from agent import run_agent_stream
-    except ImportError:
-        raise HTTPException(status_code=503, detail="Agent module not available.")
-
-    def generate():
-        try:
-            for token in run_agent_stream(request.text, store):
-                yield f"data: {json.dumps(token)}\n\n"
-            yield "data: [DONE]\n\n"
-        except Exception as e:
-            logger.error(f"Agent stream error: {e}")
-            yield f"data: {json.dumps(f'Error: {e}')}\n\n"
-            yield "data: [DONE]\n\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            logger.warning(f"MCP agent unavailable: {e}")
+    raise HTTPException(
+        status_code=503,
+        detail="Agent backend unavailable. Set USE_MCP_AGENT=true and ensure dimos MCP is running.",
     )
 
 
@@ -487,6 +490,10 @@ async def stream_frames(robot_id: str, _tok: str = Depends(verify_session)):
 
 _live_pc: dict[str, dict] = {}  # robot_id -> {b64, n, z_min, z_max, timestamp}
 _pc_voxels: dict[str, dict[tuple[int, int, int], dict]] = {}
+
+# Latest costmap per robot — stored as decoded uint8 grid (no compression).
+# shape: [height, width], data: base64 uint8 bytes, values 0=free 1-100=cost 255=unknown
+_live_costmap: dict[str, dict] = {}
 
 
 def _rebuild_accumulated_pointcloud(robot_id: str) -> None:
@@ -642,7 +649,73 @@ async def get_live_pointcloud(_tok: str = Depends(verify_session)):
     return _live_pc
 
 
-# ── Live robot pose (replaces costmap-bound pose path) ───────
+# ── Costmap heatmap ───────────────────────────────────────────
+# costmap_bridge.py (DimOS Socket.IO) POSTs here. Delta updates are
+# applied server-side so the browser always gets a complete grid.
+
+@app.post("/ingest/costmap")
+async def ingest_costmap(request: Request, _: None = Depends(verify_bridge)):
+    robot_id = request.headers.get("X-Robot-Id", "go2_a")
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(400, f"bad JSON: {e}")
+
+    cm = body.get("costmap") or body
+    grid_data = cm.get("grid", {})
+    shape = grid_data.get("shape")  # [height, width]
+
+    existing = _live_costmap.get(robot_id, {})
+
+    if grid_data.get("update_type") == "full" and grid_data.get("data"):
+        try:
+            raw = zlib.decompress(base64.b64decode(grid_data["data"]))
+            grid = bytearray(raw)
+        except Exception as e:
+            raise HTTPException(400, f"grid decode error: {e}")
+
+    elif grid_data.get("update_type") == "delta" and "grid" in existing:
+        grid = bytearray(existing["grid"])
+        shape = existing.get("shape", shape)
+        if shape:
+            _, gw = shape
+            for chunk in grid_data.get("chunks", []):
+                try:
+                    cy, cx = chunk["pos"]
+                    ch, cw = chunk["size"]
+                    chunk_raw = zlib.decompress(base64.b64decode(chunk["data"]))
+                    for row in range(ch):
+                        dst = (cy + row) * gw + cx
+                        src = row * cw
+                        grid[dst:dst + cw] = chunk_raw[src:src + cw]
+                except Exception:
+                    pass
+    else:
+        return {"status": "skipped"}
+
+    origin = cm.get("origin", {})
+    oc = origin.get("c", [0.0, 0.0, 0.0]) if isinstance(origin, dict) else [0.0, 0.0, 0.0]
+
+    _live_costmap[robot_id] = {
+        "shape": shape,
+        "grid": bytes(grid),
+        "data": base64.b64encode(grid).decode(),
+        "origin": {"x": oc[0], "y": oc[1]},
+        "resolution": cm.get("resolution", 0.05),
+        "timestamp": time.time(),
+    }
+    return {"status": "ok", "robot_id": robot_id}
+
+
+@app.get("/costmap/live")
+async def get_live_costmap(_tok: str = Depends(verify_session)):
+    return {
+        rid: {k: v for k, v in cm.items() if k != "grid"}
+        for rid, cm in _live_costmap.items()
+    }
+
+
+# ── Live robot pose ───────────────────────────────────────────
 
 # Latest pose per robot. nav_bridge.py POSTs at ~15 Hz from /odom LCM.
 _live_pose: dict[str, dict] = {}
@@ -665,6 +738,41 @@ async def ingest_pose(request: Request, _: None = Depends(verify_bridge)):
 @app.get("/pose/live")
 async def get_live_pose(_tok: str = Depends(verify_session)):
     return _live_pose
+
+
+# ── Planned path (from DimOS planner via costmap_bridge) ──────
+# Points are [[x, y], ...] in robot map frame, updated whenever DimOS replans.
+
+_live_path: dict[str, dict] = {}
+
+
+@app.post("/ingest/path")
+async def ingest_path(request: Request, _: None = Depends(verify_bridge)):
+    global _active_goal
+    robot_id = request.headers.get("X-Robot-Id", "go2_a")
+    try:
+        body = await request.json()
+    except Exception as e:
+        raise HTTPException(400, f"bad JSON: {e}")
+
+    points = body.get("path", {}).get("points", [])
+    _live_path[robot_id] = {"points": points, "timestamp": time.time()}
+
+    # Keep the goal store in sync so /goal/active reflects DimOS-originated goals too
+    if points:
+        last = points[-1]
+        x = float(last[0]) if isinstance(last, (list, tuple)) else float(last.get("x", 0))
+        y = float(last[1]) if isinstance(last, (list, tuple)) else float(last.get("y", 0))
+        _active_goal = {"x": x, "y": y, "ts": time.time(), "source": "dimos"}
+    else:
+        _active_goal = None
+
+    return {"status": "ok", "robot_id": robot_id, "n": len(points)}
+
+
+@app.get("/path/live")
+async def get_live_path(_tok: str = Depends(verify_session)):
+    return _live_path
 
 
 # ── Navigation — goal queue ───────────────────────────────────
@@ -716,7 +824,7 @@ async def get_pending_mcp_call(
     _: None = Depends(verify_bridge),
 ):
     """Long-poll: robot's bridge script waits here for the next MCP call to execute."""
-    from agent_mcp import _bridge_call_queue
+    from core.agent_mcp import _bridge_call_queue
     loop = asyncio.get_running_loop()
     try:
         call = await loop.run_in_executor(
@@ -730,7 +838,7 @@ async def get_pending_mcp_call(
 @app.post("/bridge/mcp/result")
 async def post_mcp_result(request: Request, _: None = Depends(verify_bridge)):
     """Robot's bridge script posts the MCP execution result here."""
-    from agent_mcp import _bridge_result_data, _bridge_result_events, _bridge_lock
+    from core.agent_mcp import _bridge_result_data, _bridge_result_events, _bridge_lock
     data = await request.json()
     call_id = data.get("bridge_id")
     if call_id:
@@ -750,6 +858,40 @@ async def get_map(_tok: str = Depends(verify_session)):
     states = store.load_all()
     merged = store.merge()
     return MapResponse(objects=merged, robot_count=len(states), timestamp=time.time())
+
+
+@app.get("/debug/bridges")
+async def debug_bridges(_: None = Depends(verify_bridge)):
+    """Bridge health check — shows pid, alive status, and last 20 log lines."""
+    import psutil
+    here = os.path.dirname(os.path.abspath(__file__))
+    log_dir = os.path.join(here, "logs")
+    result = {}
+    for entry in getattr(app.state, "bridge_procs", []):
+        name, p, *_ = entry
+        alive = p.poll() is None
+        # Try to get CPU/mem from psutil if available
+        try:
+            proc = psutil.Process(p.pid)
+            mem_mb = round(proc.memory_info().rss / 1e6, 1)
+        except Exception:
+            mem_mb = None
+        # Last few lines of log
+        log_path = os.path.join(log_dir, f"{name}.log")
+        tail = []
+        try:
+            with open(log_path) as f:
+                tail = f.readlines()[-20:]
+        except Exception:
+            pass
+        result[name] = {
+            "pid": p.pid,
+            "alive": alive,
+            "exit_code": p.returncode,
+            "mem_mb": mem_mb,
+            "log_tail": [l.rstrip() for l in tail],
+        }
+    return result
 
 
 # ── Dashboard UI ──────────────────────────────────────────────
@@ -812,6 +954,11 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     #nav-status.show { opacity: 1; }
     #view-hint { position: absolute; bottom: 8px; left: 10px; font-size: 10px;
                  color: rgba(255,255,255,0.22); pointer-events: none; z-index: 10; }
+    #map-view-toggle { position: absolute; top: 10px; right: 10px; z-index: 10;
+                       font-size: 11px; padding: 4px 10px; border-radius: 12px;
+                       background: rgba(13,17,23,0.85); border: 1px solid #1e2d3d;
+                       color: #4fc3f7; cursor: pointer; }
+    #map-view-toggle:hover { border-color: #4fc3f7; }
 
     #sidebar { display: flex; flex-direction: column; border-left: 1px solid #1e2d3d;
                overflow: hidden; }
@@ -968,6 +1115,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
   <div id="map-panel">
     <div id="nav-status"></div>
     <div id="view-hint">drag to orbit · scroll to zoom · click floor to navigate</div>
+    <button id="map-view-toggle" onclick="window._toggleMapView()" title="Switch between lidar pointcloud and costmap heatmap">☁️ Pointcloud</button>
   </div>
   <div id="h-resize" title="drag to resize sidebar"></div>
   <div id="sidebar">
@@ -1623,11 +1771,14 @@ scene.add(goalMarker);
 
 let _activeGoal = null;
 let _goalClearSent = false;
+let _livePath = [];   // [[x, y], ...] from DimOS planner, empty when idle
+
 function updateGoalLine() {
-  if (!_activeGoal) return;
+  if (!_activeGoal) { goalLine.visible = false; goalMarker.visible = false; return; }
   const dist = Math.hypot(_activeGoal.x - _robotX, _activeGoal.y - _robotY);
   if (dist < 0.25) {
     _activeGoal = null;
+    _livePath = [];
     goalLine.visible = false;
     goalMarker.visible = false;
     if (!_goalClearSent) {
@@ -1637,10 +1788,18 @@ function updateGoalLine() {
     return;
   }
   _goalClearSent = false;
-  goalLineGeo.setFromPoints([
-    new THREE.Vector3(_robotX, 0.08, -_robotY),
-    new THREE.Vector3(_activeGoal.x, 0.08, -_activeGoal.y),
-  ]);
+
+  // Use real planner waypoints when available, fall back to straight line.
+  let pts;
+  if (_livePath.length >= 2) {
+    pts = _livePath.map(p => new THREE.Vector3(p[0], 0.08, -p[1]));
+  } else {
+    pts = [
+      new THREE.Vector3(_robotX, 0.08, -_robotY),
+      new THREE.Vector3(_activeGoal.x, 0.08, -_activeGoal.y),
+    ];
+  }
+  goalLineGeo.setFromPoints(pts);
   goalMarker.position.set(_activeGoal.x, 0.04, -_activeGoal.y);
   goalLine.visible = true;
   goalMarker.visible = true;
@@ -1771,10 +1930,103 @@ function updateLidar(data) {
   }
 }
 
+// ── Costmap heatmap ───────────────────────────────────────────
+// Rendered as a flat Three.js plane (PlaneGeometry with canvas texture)
+// at ground level so it shares orbit/zoom controls with the pointcloud.
+// Grid values: 0=free (transparent), 1-100=cost (green→red), 255=unknown (grey).
+
+let _hmMode = false;         // false=pointcloud  true=heatmap
+let _hmPlane = null;         // Three.js Mesh
+let _hmTex = null;           // Three.js CanvasTexture
+let _hmCanvas = null;        // offscreen <canvas>
+let _hmCtx = null;
+let _hmGrid = null;          // Uint8Array — current full grid
+let _hmShape = null;         // [height, width]
+let _hmOrigin = {x:0, y:0};
+let _hmResolution = 0.05;
+
+window._toggleMapView = function() {
+  _hmMode = !_hmMode;
+  lidarPts.visible = !_hmMode;
+  if (_hmPlane) _hmPlane.visible = _hmMode;
+  const btn = document.getElementById('map-view-toggle');
+  btn.textContent = _hmMode ? '🗺️ Heatmap' : '☁️ Pointcloud';
+};
+
+function _hmRender() {
+  if (!_hmGrid || !_hmShape) return;
+  const [h, w] = _hmShape;
+  if (!_hmCanvas || _hmCanvas.width !== w || _hmCanvas.height !== h) {
+    _hmCanvas = document.createElement('canvas');
+    _hmCanvas.width = w; _hmCanvas.height = h;
+    _hmCtx = _hmCanvas.getContext('2d');
+  }
+  const img = _hmCtx.createImageData(w, h);
+  const d = img.data;
+  for (let i = 0; i < h * w; i++) {
+    const v = _hmGrid[i];
+    let r, g, b, a;
+    if (v === 0)        { r=0;   g=0;   b=0;   a=0;   }  // free — transparent
+    else if (v === 255) { r=100; g=100; b=120; a=90;  }  // unknown — dim grey
+    else {
+      const t = v / 100;                                   // cost 0..1
+      r = Math.round(80  + 175 * t);                      // green→red
+      g = Math.round(200 - 180 * t);
+      b = 60;
+      a = 180;
+    }
+    d[i*4]=r; d[i*4+1]=g; d[i*4+2]=b; d[i*4+3]=a;
+  }
+  _hmCtx.putImageData(img, 0, 0);
+
+  const planeW = w * _hmResolution;
+  const planeH = h * _hmResolution;
+
+  if (!_hmPlane) {
+    _hmTex = new THREE.CanvasTexture(_hmCanvas);
+    const mat = new THREE.MeshBasicMaterial({map:_hmTex, transparent:true, side:THREE.DoubleSide, depthWrite:false});
+    _hmPlane = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), mat);
+    _hmPlane.rotation.x = -Math.PI / 2;   // lay flat on the XZ ground plane
+    _hmPlane.visible = _hmMode;
+    scene.add(_hmPlane);
+  } else {
+    // Rescale plane if the map grew
+    _hmPlane.scale.set(planeW / (_hmPlane.geometry.parameters.width || planeW),
+                       planeH / (_hmPlane.geometry.parameters.height || planeH), 1);
+    _hmTex.needsUpdate = true;
+  }
+
+  // Position: origin is the map corner; centre the plane accordingly
+  // Three.js axes: x→x, y→height (up), z→−y-robot
+  const cx = _hmOrigin.x + planeW / 2;
+  const cy = _hmOrigin.y + planeH / 2;
+  _hmPlane.position.set(cx, 0.01, -cy);  // 1 cm above ground so it doesn't z-fight
+}
+
+async function pollCostmap() {
+  try {
+    const d = await (await _apiFetch('/costmap/live')).json();
+    const entry = d['go2_a'] || Object.values(d)[0];
+    if (!entry || !entry.data || !entry.shape) return;
+
+    const [h, w] = entry.shape;
+    const bin = atob(entry.data);
+    const grid = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) grid[i] = bin.charCodeAt(i);
+
+    _hmGrid = grid;
+    _hmShape = [h, w];
+    _hmOrigin = entry.origin || {x:0, y:0};
+    _hmResolution = entry.resolution || 0.05;
+    _hmRender();
+  } catch(e) {}
+}
+
 // ── Polling — direct from MCP/dimos LCM (via cloud bridges) ──
 //
 //   /pose/live        — nav_bridge pushes from /odom @ ~15 Hz
 //   /pointcloud/live  — pc_bridge  pushes from /lidar @ ~2 Hz
+//   /costmap/live     — costmap_bridge pushes from DimOS Socket.IO
 //   /map              — semantic objects from dimos_bridge / /ingest
 //
 let _lastPoseTs = 0;
@@ -1818,20 +2070,45 @@ async function pollGoal() {
         updateGoalLine();
       }
     } else if (_activeGoal) {
-      // Server cleared the goal (another viewer's robot arrived)
       _activeGoal = null;
+      _livePath = [];
       goalLine.visible = false;
       goalMarker.visible = false;
     }
   } catch(e) {}
 }
 
-// Pose at ~10 Hz so the marker tracks live; pointcloud at 4 Hz; objects at 0.5 Hz.
+async function pollPath() {
+  try {
+    const d = await (await _apiFetch('/path/live')).json();
+    const entry = d['go2_a'] || Object.values(d)[0];
+    if (!entry) return;
+    const pts = entry.points || [];
+    _livePath = pts;
+    if (pts.length >= 2) {
+      // Path from DimOS: treat last waypoint as the active goal
+      const last = pts[pts.length - 1];
+      if (!_activeGoal || Math.hypot(_activeGoal.x - last[0], _activeGoal.y - last[1]) > 0.1) {
+        _activeGoal = {x: last[0], y: last[1], ts: entry.timestamp || Date.now() / 1000};
+        _goalClearSent = false;
+      }
+      updateGoalLine();
+    } else if (pts.length === 0 && _livePath.length !== 0) {
+      // DimOS cleared the path (goal_reached)
+      _livePath = [];
+      updateGoalLine();
+    }
+  } catch(e) {}
+}
+
+// Pose at ~10 Hz; pointcloud at 4 Hz; path at 4 Hz; costmap at 1 Hz; objects at 0.5 Hz.
 setInterval(pollPose,       100);
 setInterval(pollPointcloud, 250);
+setInterval(pollPath,       250);
+setInterval(pollCostmap,   1000);
 setInterval(pollSem,       2000);
 setInterval(pollGoal,      1000);
-pollPose(); pollPointcloud(); pollSem(); pollGoal();
+pollPose(); pollPointcloud(); pollPath(); pollCostmap(); pollSem(); pollGoal();
 
 // ── Resize: ResizeObserver covers BOTH window resize AND sidebar drags ──
 function _fitRendererToPanel() {
@@ -1849,6 +2126,8 @@ new ResizeObserver(_fitRendererToPanel).observe(panel);
 (function animate() {
   requestAnimationFrame(animate);
   controls.update();
+
+  if (_hmTex && _hmPlane && _hmPlane.visible) _hmTex.needsUpdate = true;
 
   if (robotGrp.visible) {
     const t = Date.now() * 0.001;

@@ -21,7 +21,7 @@ import time
 import logging
 from typing import Protocol
 
-from models import WorldState, DetectedObject
+from .models import WorldState, DetectedObject
 
 logger = logging.getLogger(__name__)
 

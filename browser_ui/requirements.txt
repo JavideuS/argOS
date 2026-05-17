@@ -14,3 +14,4 @@ boto3>=1.34.0
 
 # Standard library only below this line (no install needed):
 # asyncio, base64, json, logging, os, threading, time, zlib
+psutil

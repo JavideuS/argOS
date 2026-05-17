@@ -1,2 +1,3 @@
-fastapi_app
+logs
+*LOG*
 __pycache__

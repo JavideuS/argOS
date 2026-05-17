@@ -5,7 +5,7 @@ Usage:
     python run_bridges.py --cloud-url http://<ec2-ip>:8080
 
 Spawns (all restart automatically on crash):
-  ws_bridge.py      — Socket.IO bridge (DimOS viz events: pose, costmap, path)
+  costmap_bridge.py — Costmap heatmap from DimOS Socket.IO (port 7779)
   camera_bridge.py  — Camera frames (LCM / HTTP / RTSP, auto-detected)
   pc_bridge.py      — LiDAR point cloud (LCM)
   nav_bridge.py     — Pose push + goal forwarding (LCM)
@@ -74,8 +74,8 @@ def main() -> None:
     rid   = args.robot_id
 
     bridge_specs: list[tuple[str, list[str]]] = [
-        ("ws_bridge", [
-            py, "-u", os.path.join(HERE, "ws_bridge.py"),
+        ("costmap_bridge", [
+            py, "-u", os.path.join(HERE, "costmap_bridge.py"),
             "--cloud-url", cloud,
             "--robot-id", rid,
             "--ws-url", args.ws_url,
