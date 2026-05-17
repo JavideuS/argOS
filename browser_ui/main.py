@@ -491,9 +491,7 @@ async def stream_frames(robot_id: str, _tok: str = Depends(verify_session)):
 _live_pc: dict[str, dict] = {}  # robot_id -> {b64, n, z_min, z_max, timestamp}
 _pc_voxels: dict[str, dict[tuple[int, int, int], dict]] = {}
 
-# Latest costmap per robot — stored as decoded uint8 grid (no compression).
-# shape: [height, width], data: base64 uint8 bytes, values 0=free 1-100=cost 255=unknown
-_live_costmap: dict[str, dict] = {}
+# _live_costmap is declared inside the costmap heatmap section below.
 
 
 def _rebuild_accumulated_pointcloud(robot_id: str) -> None:
@@ -650,8 +648,108 @@ async def get_live_pointcloud(_tok: str = Depends(verify_session)):
 
 
 # ── Costmap heatmap ───────────────────────────────────────────
-# costmap_bridge.py (DimOS Socket.IO) POSTs here. Delta updates are
-# applied server-side so the browser always gets a complete grid.
+# costmap_bridge.py (DimOS Socket.IO) POSTs here.  Full and delta updates
+# are accumulated server-side; the browser receives a complete flat grid
+# each poll and only re-renders when the version counter changes.
+#
+# Per-robot state keys: buf (raw bytes), shape, v (version), data (b64),
+# origin, resolution, timestamp.
+
+_live_costmap: dict[str, dict] = {}
+
+
+def _apply_costmap_update(robot_id: str, cm: dict) -> bool:
+    """
+    Decode DimOS OptimizedCostmapEncoder payload into a flat uint8 buffer.
+    Only bumps the version counter when grid content, origin, or resolution
+    actually changed — so the browser skips truly-unchanged polls.
+    Returns True if the stored costmap was updated.
+    """
+    grid_data = cm.get("grid", {})
+    update_type = grid_data.get("update_type", "")
+    shape = grid_data.get("shape", [0, 0])
+    existing = _live_costmap.get(robot_id, {})
+
+    try:
+        if update_type == "full" and grid_data.get("data"):
+            buf = bytearray(zlib.decompress(base64.b64decode(grid_data["data"])))
+
+        elif update_type == "delta" and "buf" in existing:
+            chunks = grid_data.get("chunks", [])
+            if not chunks:
+                # Empty delta — nothing changed in the grid.
+                # Still update origin/resolution if they shifted.
+                origin = cm.get("origin", {})
+                oc = origin.get("c", [0.0, 0.0, 0.0]) if isinstance(origin, dict) else [0.0, 0.0, 0.0]
+                new_origin = {"x": oc[0], "y": oc[1]}
+                new_res = cm.get("resolution", 0.05)
+                old_origin = existing.get("origin", {})
+                old_res = existing.get("resolution", 0.05)
+                if (abs(new_origin.get("x", 0) - old_origin.get("x", 0)) > 1e-6 or
+                    abs(new_origin.get("y", 0) - old_origin.get("y", 0)) > 1e-6 or
+                    abs(new_res - old_res) > 1e-9):
+                    # Origin or resolution shifted — bump version so browser
+                    # repositions the plane, but reuse existing grid data.
+                    existing["origin"] = new_origin
+                    existing["resolution"] = new_res
+                    existing["v"] = existing.get("v", 0) + 1
+                    existing["timestamp"] = time.time()
+                    return True
+                return False
+            buf   = bytearray(existing["buf"])
+            shape = existing.get("shape", shape)
+            h, w  = shape
+            for chunk in chunks:
+                cy, cx       = chunk["pos"]
+                ch_h, ch_w   = chunk["size"]
+                raw = zlib.decompress(base64.b64decode(chunk["data"]))
+                for row in range(ch_h):
+                    dst = (cy + row) * w + cx
+                    buf[dst:dst + ch_w] = raw[row * ch_w:(row + 1) * ch_w]
+
+        else:
+            if update_type not in ("full", "delta"):
+                logger.debug(f"[costmap] unknown update_type={update_type!r} for {robot_id}")
+            elif update_type == "delta":
+                logger.debug(f"[costmap] delta arrived before first full for {robot_id} — skipping")
+            return False
+
+    except Exception as e:
+        logger.warning(f"[costmap] decode error for {robot_id}: {e}")
+        return False
+
+    buf_bytes = bytes(buf)
+    origin = cm.get("origin", {})
+    oc = origin.get("c", [0.0, 0.0, 0.0]) if isinstance(origin, dict) else [0.0, 0.0, 0.0]
+
+    # Skip version bump if grid bytes are identical to what we already have.
+    if existing.get("buf") == buf_bytes and existing.get("shape") == shape:
+        new_origin = {"x": oc[0], "y": oc[1]}
+        old_origin = existing.get("origin", {})
+        new_res = cm.get("resolution", 0.05)
+        old_res = existing.get("resolution", 0.05)
+        if (abs(new_origin.get("x", 0) - old_origin.get("x", 0)) < 1e-6 and
+            abs(new_origin.get("y", 0) - old_origin.get("y", 0)) < 1e-6 and
+            abs(new_res - old_res) < 1e-9):
+            return False
+        # Origin/resolution changed, same grid — update metadata and bump.
+        existing["origin"] = new_origin
+        existing["resolution"] = new_res
+        existing["v"] = existing.get("v", 0) + 1
+        existing["timestamp"] = time.time()
+        return True
+
+    _live_costmap[robot_id] = {
+        "buf":        buf_bytes,
+        "shape":      shape,
+        "v":          existing.get("v", 0) + 1,
+        "data":       base64.b64encode(buf_bytes).decode(),
+        "origin":     {"x": oc[0], "y": oc[1]},
+        "resolution": cm.get("resolution", 0.05),
+        "timestamp":  time.time(),
+    }
+    return True
+
 
 @app.post("/ingest/costmap")
 async def ingest_costmap(request: Request, _: None = Depends(verify_bridge)):
@@ -660,57 +758,16 @@ async def ingest_costmap(request: Request, _: None = Depends(verify_bridge)):
         body = await request.json()
     except Exception as e:
         raise HTTPException(400, f"bad JSON: {e}")
-
     cm = body.get("costmap") or body
-    grid_data = cm.get("grid", {})
-    shape = grid_data.get("shape")  # [height, width]
-
-    existing = _live_costmap.get(robot_id, {})
-
-    if grid_data.get("update_type") == "full" and grid_data.get("data"):
-        try:
-            raw = zlib.decompress(base64.b64decode(grid_data["data"]))
-            grid = bytearray(raw)
-        except Exception as e:
-            raise HTTPException(400, f"grid decode error: {e}")
-
-    elif grid_data.get("update_type") == "delta" and "grid" in existing:
-        grid = bytearray(existing["grid"])
-        shape = existing.get("shape", shape)
-        if shape:
-            _, gw = shape
-            for chunk in grid_data.get("chunks", []):
-                try:
-                    cy, cx = chunk["pos"]
-                    ch, cw = chunk["size"]
-                    chunk_raw = zlib.decompress(base64.b64decode(chunk["data"]))
-                    for row in range(ch):
-                        dst = (cy + row) * gw + cx
-                        src = row * cw
-                        grid[dst:dst + cw] = chunk_raw[src:src + cw]
-                except Exception:
-                    pass
-    else:
-        return {"status": "skipped"}
-
-    origin = cm.get("origin", {})
-    oc = origin.get("c", [0.0, 0.0, 0.0]) if isinstance(origin, dict) else [0.0, 0.0, 0.0]
-
-    _live_costmap[robot_id] = {
-        "shape": shape,
-        "grid": bytes(grid),
-        "data": base64.b64encode(grid).decode(),
-        "origin": {"x": oc[0], "y": oc[1]},
-        "resolution": cm.get("resolution", 0.05),
-        "timestamp": time.time(),
-    }
-    return {"status": "ok", "robot_id": robot_id}
+    updated = _apply_costmap_update(robot_id, cm)
+    return {"status": "ok" if updated else "skipped", "robot_id": robot_id}
 
 
 @app.get("/costmap/live")
 async def get_live_costmap(_tok: str = Depends(verify_session)):
+    # Exclude raw buf bytes — browser only needs b64-encoded data + metadata.
     return {
-        rid: {k: v for k, v in cm.items() if k != "grid"}
+        rid: {k: v for k, v in cm.items() if k != "buf"}
         for rid, cm in _live_costmap.items()
     }
 
@@ -959,6 +1016,13 @@ DASHBOARD_HTML = """<!DOCTYPE html>
                        background: rgba(13,17,23,0.85); border: 1px solid #1e2d3d;
                        color: #4fc3f7; cursor: pointer; }
     #map-view-toggle:hover { border-color: #4fc3f7; }
+    #hm-legend { display: none; position: absolute; bottom: 30px; left: 10px; z-index: 10;
+                 background: rgba(13,17,23,0.82); border: 1px solid #1e2d3d;
+                 border-radius: 8px; padding: 6px 10px; font-size: 10px; color: #ccc;
+                 pointer-events: none; }
+    #hm-legend.visible { display: flex; flex-direction: column; gap: 3px; }
+    .hm-row { display: flex; align-items: center; gap: 6px; }
+    .hm-swatch { width: 14px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 
     #sidebar { display: flex; flex-direction: column; border-left: 1px solid #1e2d3d;
                overflow: hidden; }
@@ -1116,6 +1180,12 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     <div id="nav-status"></div>
     <div id="view-hint">drag to orbit · scroll to zoom · click floor to navigate</div>
     <button id="map-view-toggle" onclick="window._toggleMapView()" title="Switch between lidar pointcloud and costmap heatmap">☁️ Pointcloud</button>
+    <div id="hm-legend">
+      <div class="hm-row"><div class="hm-swatch" style="background:rgba(50,220,160,0.8)"></div>Safe (low cost)</div>
+      <div class="hm-row"><div class="hm-swatch" style="background:rgba(255,210,0,0.9)"></div>Caution</div>
+      <div class="hm-row"><div class="hm-swatch" style="background:rgba(255,80,0,0.95)"></div>Near obstacle</div>
+      <div class="hm-row"><div class="hm-swatch" style="background:rgba(255,255,255,0.9);border:1px solid #444"></div>Wall (lethal)</div>
+    </div>
   </div>
   <div id="h-resize" title="drag to resize sidebar"></div>
   <div id="sidebar">
@@ -1771,10 +1841,10 @@ scene.add(goalMarker);
 
 let _activeGoal = null;
 let _goalClearSent = false;
-let _livePath = [];   // [[x, y], ...] from DimOS planner, empty when idle
+let _livePath = [];   // planner waypoints — visual only, never drives goal management
 
 function updateGoalLine() {
-  if (!_activeGoal) { goalLine.visible = false; goalMarker.visible = false; return; }
+  if (!_activeGoal) return;
   const dist = Math.hypot(_activeGoal.x - _robotX, _activeGoal.y - _robotY);
   if (dist < 0.25) {
     _activeGoal = null;
@@ -1788,17 +1858,10 @@ function updateGoalLine() {
     return;
   }
   _goalClearSent = false;
-
-  // Use real planner waypoints when available, fall back to straight line.
-  let pts;
-  if (_livePath.length >= 2) {
-    pts = _livePath.map(p => new THREE.Vector3(p[0], 0.08, -p[1]));
-  } else {
-    pts = [
-      new THREE.Vector3(_robotX, 0.08, -_robotY),
-      new THREE.Vector3(_activeGoal.x, 0.08, -_activeGoal.y),
-    ];
-  }
+  const pts = _livePath.length >= 2
+    ? _livePath.map(p => new THREE.Vector3(p[0], 0.08, -p[1]))
+    : [new THREE.Vector3(_robotX, 0.08, -_robotY),
+       new THREE.Vector3(_activeGoal.x, 0.08, -_activeGoal.y)];
   goalLineGeo.setFromPoints(pts);
   goalMarker.position.set(_activeGoal.x, 0.04, -_activeGoal.y);
   goalLine.visible = true;
@@ -1937,13 +2000,13 @@ function updateLidar(data) {
 
 let _hmMode = false;         // false=pointcloud  true=heatmap
 let _hmPlane = null;         // Three.js Mesh
-let _hmTex = null;           // Three.js CanvasTexture
-let _hmCanvas = null;        // offscreen <canvas>
-let _hmCtx = null;
+let _hmTex = null;           // THREE.DataTexture (replaced each grid update)
+let _hmMat = null;           // shared material — survives texture swaps
 let _hmGrid = null;          // Uint8Array — current full grid
 let _hmShape = null;         // [height, width]
 let _hmOrigin = {x:0, y:0};
 let _hmResolution = 0.05;
+let _hmDirty = false;        // true when canvas was updated while heatmap hidden
 
 window._toggleMapView = function() {
   _hmMode = !_hmMode;
@@ -1951,63 +2014,103 @@ window._toggleMapView = function() {
   if (_hmPlane) _hmPlane.visible = _hmMode;
   const btn = document.getElementById('map-view-toggle');
   btn.textContent = _hmMode ? '🗺️ Heatmap' : '☁️ Pointcloud';
+  document.getElementById('hm-legend').classList.toggle('visible', _hmMode);
+  if (_hmMode) {
+    // Reset version so the next poll always re-renders even if v hasn't changed,
+    // then fire an immediate fetch instead of waiting up to 1 s for the tick.
+    _hmLastV = -1;
+    pollCostmap();
+  }
 };
+
+/* Paint _hmGrid into an RGBA Uint8Array and push it as a brand-new
+   DataTexture.  DataTexture avoids CanvasTexture's internal-bitmap
+   caching and guarantees the GPU sees fresh pixels every call. */
+function _hmBuildTexture() {
+  if (!_hmGrid || !_hmShape) return;
+  const [h, w] = _hmShape;
+  const rgba = new Uint8Array(h * w * 4);
+  for (let i = 0; i < h * w; i++) {
+    const v = _hmGrid[i];
+    let r, g, b, a;
+    if (v === 0 || v === 255) {
+      // Free space or unknown/unexplored — fully transparent
+      r=0; g=0; b=0; a=0;
+    } else if (v >= 253) {
+      // Lethal / inscribed obstacle — bright white
+      r=255; g=255; b=255; a=230;
+    } else if (v < 90) {
+      const t = v / 89;
+      r = Math.round(0   + 100 * t);
+      g = Math.round(200 +  30 * t);
+      b = Math.round(140 - 60  * t);
+      a = Math.round(110 + 60  * t);
+    } else {
+      const t = (v - 90) / 163;
+      r = Math.round(220 + 35  * t);
+      g = Math.round(200 - 200 * t);
+      b = 0;
+      a = Math.round(160 + 60  * t);
+    }
+    rgba[i*4]=r; rgba[i*4+1]=g; rgba[i*4+2]=b; rgba[i*4+3]=a;
+  }
+
+  // Dispose old texture, create a fresh DataTexture — avoids any WebGL
+  // cache / CanvasTexture bitmap staleness entirely.
+  if (_hmTex) _hmTex.dispose();
+  _hmTex = new THREE.DataTexture(rgba, w, h, THREE.RGBAFormat);
+  _hmTex.flipY = false;
+  _hmTex.needsUpdate = true;
+
+  if (!_hmMat) {
+    _hmMat = new THREE.MeshBasicMaterial({
+      map: _hmTex, transparent: true, side: THREE.DoubleSide, depthWrite: false
+    });
+  } else {
+    _hmMat.map = _hmTex;
+    _hmMat.needsUpdate = true;
+  }
+}
 
 function _hmRender() {
   if (!_hmGrid || !_hmShape) return;
   const [h, w] = _hmShape;
-  if (!_hmCanvas || _hmCanvas.width !== w || _hmCanvas.height !== h) {
-    _hmCanvas = document.createElement('canvas');
-    _hmCanvas.width = w; _hmCanvas.height = h;
-    _hmCtx = _hmCanvas.getContext('2d');
-  }
-  const img = _hmCtx.createImageData(w, h);
-  const d = img.data;
-  for (let i = 0; i < h * w; i++) {
-    const v = _hmGrid[i];
-    let r, g, b, a;
-    if (v === 0)        { r=0;   g=0;   b=0;   a=0;   }  // free — transparent
-    else if (v === 255) { r=100; g=100; b=120; a=90;  }  // unknown — dim grey
-    else {
-      const t = v / 100;                                   // cost 0..1
-      r = Math.round(80  + 175 * t);                      // green→red
-      g = Math.round(200 - 180 * t);
-      b = 60;
-      a = 180;
-    }
-    d[i*4]=r; d[i*4+1]=g; d[i*4+2]=b; d[i*4+3]=a;
-  }
-  _hmCtx.putImageData(img, 0, 0);
-
   const planeW = w * _hmResolution;
   const planeH = h * _hmResolution;
 
+  // Build pixel data → DataTexture
+  _hmBuildTexture();
+
   if (!_hmPlane) {
-    _hmTex = new THREE.CanvasTexture(_hmCanvas);
-    const mat = new THREE.MeshBasicMaterial({map:_hmTex, transparent:true, side:THREE.DoubleSide, depthWrite:false});
-    _hmPlane = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), mat);
-    _hmPlane.rotation.x = -Math.PI / 2;   // lay flat on the XZ ground plane
+    _hmPlane = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), _hmMat);
+    _hmPlane.rotation.x = -Math.PI / 2;
     _hmPlane.visible = _hmMode;
     scene.add(_hmPlane);
   } else {
-    // Rescale plane if the map grew
-    _hmPlane.scale.set(planeW / (_hmPlane.geometry.parameters.width || planeW),
-                       planeH / (_hmPlane.geometry.parameters.height || planeH), 1);
-    _hmTex.needsUpdate = true;
+    // Rebuild geometry if grid dimensions changed
+    const oldW = _hmPlane.geometry.parameters.width;
+    const oldH = _hmPlane.geometry.parameters.height;
+    if (Math.abs(planeW - oldW) > 0.001 || Math.abs(planeH - oldH) > 0.001) {
+      _hmPlane.geometry.dispose();
+      _hmPlane.geometry = new THREE.PlaneGeometry(planeW, planeH);
+    }
   }
 
   // Position: origin is the map corner; centre the plane accordingly
-  // Three.js axes: x→x, y→height (up), z→−y-robot
   const cx = _hmOrigin.x + planeW / 2;
   const cy = _hmOrigin.y + planeH / 2;
-  _hmPlane.position.set(cx, 0.01, -cy);  // 1 cm above ground so it doesn't z-fight
+  _hmPlane.position.set(cx, 0.01, -cy);
 }
+
+let _hmLastV = -1;
 
 async function pollCostmap() {
   try {
     const d = await (await _apiFetch('/costmap/live')).json();
     const entry = d['go2_a'] || Object.values(d)[0];
     if (!entry || !entry.data || !entry.shape) return;
+    if (entry.v === _hmLastV) return;   // nothing changed — skip redraw
+    _hmLastV = entry.v;
 
     const [h, w] = entry.shape;
     const bin = atob(entry.data);
@@ -2018,7 +2121,21 @@ async function pollCostmap() {
     _hmShape = [h, w];
     _hmOrigin = entry.origin || {x:0, y:0};
     _hmResolution = entry.resolution || 0.05;
-    _hmRender();
+
+    if (_hmMode) {
+      _hmRender();
+    } else {
+      // Heatmap hidden — just update position if the plane exists,
+      // defer the expensive texture rebuild until the user toggles to heatmap.
+      _hmDirty = true;
+      if (_hmPlane) {
+        const planeW = w * _hmResolution;
+        const planeH = h * _hmResolution;
+        const cx = _hmOrigin.x + planeW / 2;
+        const cy = _hmOrigin.y + planeH / 2;
+        _hmPlane.position.set(cx, 0.01, -cy);
+      }
+    }
   } catch(e) {}
 }
 
@@ -2083,21 +2200,8 @@ async function pollPath() {
     const d = await (await _apiFetch('/path/live')).json();
     const entry = d['go2_a'] || Object.values(d)[0];
     if (!entry) return;
-    const pts = entry.points || [];
-    _livePath = pts;
-    if (pts.length >= 2) {
-      // Path from DimOS: treat last waypoint as the active goal
-      const last = pts[pts.length - 1];
-      if (!_activeGoal || Math.hypot(_activeGoal.x - last[0], _activeGoal.y - last[1]) > 0.1) {
-        _activeGoal = {x: last[0], y: last[1], ts: entry.timestamp || Date.now() / 1000};
-        _goalClearSent = false;
-      }
-      updateGoalLine();
-    } else if (pts.length === 0 && _livePath.length !== 0) {
-      // DimOS cleared the path (goal_reached)
-      _livePath = [];
-      updateGoalLine();
-    }
+    _livePath = entry.points || [];
+    if (_activeGoal) updateGoalLine();
   } catch(e) {}
 }
 
@@ -2126,8 +2230,6 @@ new ResizeObserver(_fitRendererToPanel).observe(panel);
 (function animate() {
   requestAnimationFrame(animate);
   controls.update();
-
-  if (_hmTex && _hmPlane && _hmPlane.visible) _hmTex.needsUpdate = true;
 
   if (robotGrp.visible) {
     const t = Date.now() * 0.001;
