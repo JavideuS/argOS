@@ -1,0 +1,33 @@
+diff --git a/dimos/agents/mcp/mcp_client.py b/dimos/agents/mcp/mcp_client.py
+index 75b532e9c..1c752132d 100644
+--- a/dimos/agents/mcp/mcp_client.py
++++ b/dimos/agents/mcp/mcp_client.py
+@@ -218,14 +218,21 @@ class McpClient(Module):
+ 
+             model = MockModel(json_path=self.config.model_fixture)
+ 
+-        with self._lock:
+-            self._state_graph = create_agent(
+-                model=model,
+-                tools=tools,
+-                system_prompt=self.config.system_prompt,
++        try:
++            with self._lock:
++                self._state_graph = create_agent(
++                    model=model,
++                    tools=tools,
++                    system_prompt=self.config.system_prompt,
++                )
++                if not self._thread.is_alive():
++                    self._thread.start()
++        except Exception as e:
++            logger.warning(
++                f"McpClient: agent init failed ({e}). "
++                "DimOS's built-in agent is disabled — use an external agent "
++                "(e.g. ArgOS) that connects to McpServer on port 9990."
+             )
+-            if not self._thread.is_alive():
+-                self._thread.start()
+ 
+     @rpc
+     def stop(self) -> None:

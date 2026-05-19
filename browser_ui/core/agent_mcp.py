@@ -46,9 +46,13 @@ _bridge_result_events: dict[str, _threading.Event] = {} # call_id → wait event
 _bridge_lock = _threading.Lock()
 
 AWS_REGION = os.environ.get("AWS_REGION", "us-west-2")
-BEDROCK_MODEL_ID = os.environ.get(
-    "BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-6"
-)
+def _default_model_id(region: str) -> str:
+    # Bedrock cross-region inference profiles require a geo prefix (us/eu/ap).
+    for prefix in ("us", "eu", "ap"):
+        if region.startswith(prefix):
+            return f"{prefix}.anthropic.claude-sonnet-4-6"
+    return "us.anthropic.claude-sonnet-4-6"
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID") or _default_model_id(AWS_REGION)
 MAX_TOKENS = int(os.environ.get("BEDROCK_MAX_TOKENS", "1024"))
 MCP_TIMEOUT = float(os.environ.get("DIMOS_MCP_TIMEOUT", "60"))
 

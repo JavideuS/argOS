@@ -60,7 +60,7 @@ If you plan to use AWS Bedrock or S3 for the semantic map:
 uv pip install langchain-aws boto3
 ```
 
-### 2. Apply the DimOS patches
+### 2. Apply the DimOS patches and fix a dependency conflict
 
 Five bug fixes are required for stable operation. Apply them on top of your DimOS
 checkout before running:
@@ -70,8 +70,15 @@ cd /path/to/dimos
 git apply /path/to/argOS/patches/dimos/*.patch
 ```
 
-See [`patches/dimos/README.md`](patches/dimos/README.md) for what each patch does
-and how to verify they applied cleanly.
+Then fix a protobuf/opentelemetry version conflict that prevents DimOS from starting
+(DimOS pins protobuf ≥ 6 but an older chromadb transitive dep is incompatible):
+
+```bash
+uv pip install "opentelemetry-exporter-otlp-proto-grpc>=1.26"
+```
+
+See [`patches/dimos/README.md`](patches/dimos/README.md) for details on each patch
+and the dependency fix.
 
 ### 3. Set up the ArgOS cloud layer
 

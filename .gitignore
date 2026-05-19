@@ -15,3 +15,8 @@ build/
 
 .venv/
 venv/
+
+logs/
+*LOG*
+
+CLAUDE.md
