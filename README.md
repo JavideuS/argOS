@@ -87,11 +87,40 @@ cd argOS/browser_ui
 pip install -r requirements.txt
 ```
 
-Environment variables (minimum to run locally without AWS):
+ArgOS supports two LLM backends. Pick one:
+
+#### Option A — Anthropic API (simplest)
 
 ```bash
-export ANTHROPIC_API_KEY=sk-...      # or use AWS Bedrock — see browser_ui/README.md
-export BRIDGE_PASSWORD=changeme      # shared secret between server and bridge scripts
+export ANTHROPIC_API_KEY=sk-...
+export BRIDGE_PASSWORD=changeme
+```
+
+#### Option B — AWS Bedrock (no OpenAI/Anthropic key required)
+
+Requires AWS credentials with Bedrock access (`bedrock:InvokeModelWithResponseStream`).
+ArgOS uses Claude via [cross-region inference profiles](https://docs.aws.amazon.com/bedrock/latest/userguide/cross-region-inference.html),
+so the model ID must include a geographic prefix (`us.`, `eu.`, `ap.`) — plain model IDs don't work.
+
+```bash
+# AWS credentials (pick one approach)
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...        # only if using temporary credentials / SSO
+# or: configure via `aws configure` / instance role (EC2) — boto3 picks these up automatically
+
+# Region and model (ArgOS auto-derives the prefix from the region)
+export AWS_REGION=eu-north-1        # or us-west-2, ap-southeast-1, etc.
+# BEDROCK_MODEL_ID is optional — defaults to <prefix>.anthropic.claude-sonnet-4-6
+# export BEDROCK_MODEL_ID=eu.anthropic.claude-sonnet-4-6
+
+export BRIDGE_PASSWORD=changeme
+```
+
+If you also install the `langchain-aws` and `boto3` packages (needed for S3 semantic map persistence):
+
+```bash
+uv pip install langchain-aws boto3
 ```
 
 ### 4. Run

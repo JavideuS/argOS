@@ -1,0 +1,53 @@
+# Example ros2_bridge.py fleet config.
+
+# `id`/`robot_radius`/`inflation` mirror fleet-coordinator's config/mission.example.yaml shape;
+# `namespace`/`backend`/`urdf_path` are this bridge's own fields.
+# `robot_radius`/`inflation` default to fleet_coordinator.robot.Robot's own
+# defaults (0.35 / 0.0) when omitted -- a homogeneous fleet only needs
+# id+namespace.
+#
+# Pose comes from TF (`map -> base_frame`), not a topic -- true for every
+# backend (REP-105/120), so there's no `topics.pose` override. `base_frame`
+# defaults to `base_footprint` (the ground-projected frame, roll/pitch
+# zeroed) -- confirmed present via `ros2 run tf2_ros tf2_echo base_footprint
+# base_link --ros-args -r /tf:=/ranger_sim1/tf -r /tf_static:=/ranger_sim1/tf_static`
+# (near-zero translation/rotation from base_link, as expected for this
+# platform), so both robots below use the default -- no override needed.
+#
+# `topics:` is an optional per-robot override for `path` (and `map`, on
+# whichever robot has `map_source: true`) if your nav2 bringup doesn't use
+# the plain `received_global_plan` / `map` convention (see ros2_backends/nav2.py).
+#
+# `map_source: true` marks this robot's own /map as the fleet's shared
+# static-map layer (pushed once, not per-robot -- every robot's map_server
+# serves the same environment here). At most one robot should set it; if
+# none do, the first robot in the list is used.
+#
+# `model:` is the slug argOS serves the render model at (/models/<model>/) --
+# see browser_ui/static/models/README.md for how to produce that directory
+# from a xacro source (xacro isn't a bridge-side dependency, so that step
+# runs once, separately, in a ROS2-sourced shell). `urdf_path` is unrelated:
+# it's this bridge's own local sanity check that the *source* xacro exists.
+
+cloud_url: http://localhost:8080
+pose_hz: 15.0
+
+robots:
+  - id: ranger_1
+    namespace: ranger_sim1
+    backend: nav2
+    robot_radius: 0.35
+    inflation: 0.1
+    urdf_path: /home/javideus/quantum_ws/Fraunhofer/rangers/ranger_mini3_ros2/robots/ranger_mini_v3.xacro.urdf
+    model: ranger_mini_v3
+    map_source: true
+
+  - id: ranger_2
+    namespace: ranger_sim2
+    backend: nav2
+    robot_radius: 0.35
+    inflation: 0.1
+    urdf_path: /home/javideus/quantum_ws/Fraunhofer/rangers/ranger_mini3_ros2/robots/ranger_mini_v3.xacro.urdf
+    model: ranger_mini_v3
+    # topics:
+    #   path: received_global_plan
