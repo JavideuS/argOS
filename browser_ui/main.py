@@ -843,7 +843,6 @@ _live_path: dict[str, dict] = {}
 
 @app.post("/ingest/path")
 async def ingest_path(request: Request, _: None = Depends(verify_bridge)):
-    global _active_goal
     robot_id = request.headers.get("X-Robot-Id", "go2_a")
     try:
         body = await request.json()
@@ -851,17 +850,18 @@ async def ingest_path(request: Request, _: None = Depends(verify_bridge)):
         raise HTTPException(400, f"bad JSON: {e}")
 
     points = body.get("path", {}).get("points", [])
-    _live_path[robot_id] = {"points": points, "timestamp": time.time()}
+    goal_yaw = body.get("path", {}).get("goal_yaw")
+    _live_path[robot_id] = {"points": points, "goal_yaw": goal_yaw, "timestamp": time.time()}
 
-    # Keep the goal store in sync so /goal/active reflects DimOS-originated goals too
-    if points:
-        last = points[-1]
-        x = float(last[0]) if isinstance(last, (list, tuple)) else float(last.get("x", 0))
-        y = float(last[1]) if isinstance(last, (list, tuple)) else float(last.get("y", 0))
-        _active_goal = {"x": x, "y": y, "ts": time.time(), "source": "dimos"}
-    else:
-        _active_goal = None
-
+    # _active_goal (see /goal/active below) used to get overwritten here on
+    # every path push -- fine for one robot, actively wrong once a fleet is
+    # pushing paths concurrently: two robots racing to overwrite one global
+    # "the goal" produced a stray marker at whichever robot posted last,
+    # paired with a line drawn from a different (fixed, single) robot's
+    # position -- looked exactly like a phantom, disconnected path. Each
+    # robot's own current plan is already shown correctly, per-robot, via
+    # /path/live -> updateFleetPaths' fleetGoalMarkers on the client; this
+    # endpoint has no business touching the single click-to-navigate goal.
     return {"status": "ok", "robot_id": robot_id, "n": len(points)}
 
 

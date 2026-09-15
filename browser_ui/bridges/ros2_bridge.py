@@ -198,8 +198,10 @@ class RobotBridge:
             namespace=config.namespace,
             cli_args=[
                 "--ros-args",
-                "-r", f"/tf:=/{config.namespace}/tf",
-                "-r", f"/tf_static:=/{config.namespace}/tf_static",
+                "-r",
+                f"/tf:=/{config.namespace}/tf",
+                "-r",
+                f"/tf_static:=/{config.namespace}/tf_static",
             ],
         )
 
@@ -226,14 +228,18 @@ class RobotBridge:
                 f"{self.cloud_url}{endpoint}", json=payload, timeout=1.5
             )
             if not r.ok:
-                log.warning(f"[{self.config.id}] {endpoint} -> {r.status_code}: {r.text[:200]}")
+                log.warning(
+                    f"[{self.config.id}] {endpoint} -> {r.status_code}: {r.text[:200]}"
+                )
         except Exception as e:
             log.warning(f"[{self.config.id}] push {endpoint} failed: {e}")
 
     def _poll_pose(self) -> None:
         try:
             tf = self.tf_buffer.lookup_transform(
-                "map", self.config.base_frame, rclpy.time.Time(),
+                "map",
+                self.config.base_frame,
+                rclpy.time.Time(),
                 timeout=Duration(seconds=0.05),
             )
         except tf2_ros.TransformException:
@@ -282,9 +288,48 @@ class RobotBridge:
         now = time.time()
         if now - self._last_path_push < self._path_interval:
             return
+        # received_global_plan's own poses come stamped in msg.header.frame_id
+        # (this backend: base_link, the robot's own body frame -- NOT map),
+        # so pose.pose.position is relative to wherever the robot currently
+        # is, not world-fixed. Pushed raw, every point renders as if the
+        # robot's own frame origin *is* the map origin -- the plan's shape
+        # still looks right (frame-relative geometry is unaffected) but it
+        # always visually starts at (0, 0) instead of at the robot. Rotate +
+        # translate through map -> frame_id (same "latest available" TF
+        # lookup _poll_pose already uses, for the same extrapolation-safety
+        # reason) to place the plan in world coordinates before pushing.
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                "map",
+                msg.header.frame_id,
+                rclpy.time.Time(),
+                timeout=Duration(seconds=0.05),
+            )
+        except tf2_ros.TransformException:
+            return
         self._last_path_push = now
-        points = [[pose.pose.position.x, pose.pose.position.y] for pose in msg.poses]
-        self._push("/ingest/path", {"path": {"points": points}})
+        tx, ty = tf.transform.translation.x, tf.transform.translation.y
+        yaw = _yaw_from_quaternion(tf.transform.rotation)
+        cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
+        points = []
+        for pose in msg.poses:
+            lx, ly = pose.pose.position.x, pose.pose.position.y
+            points.append(
+                [
+                    tx + lx * cos_yaw - ly * sin_yaw,
+                    ty + lx * sin_yaw + ly * cos_yaw,
+                ]
+            )
+        # Final waypoint's own heading, world-frame -- same rotate-by-yaw as
+        # the positions above, just applied to its orientation instead of
+        # its translation (2D: world_yaw = transform_yaw + local_yaw). Only
+        # the last pose is needed
+        # This drives the goal marker's arrow (theta, not just position),
+        # not the path line itself.
+        goal_yaw = None
+        if msg.poses:
+            goal_yaw = yaw + _yaw_from_quaternion(msg.poses[-1].pose.orientation)
+        self._push("/ingest/path", {"path": {"points": points, "goal_yaw": goal_yaw}})
 
 
 # ── Shared static map (one source robot) ───────────────────────
@@ -318,7 +363,9 @@ class MapBridge:
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             depth=1,
         )
-        node.create_subscription(backend.map_msg_type(), backend.map_topic(), self._on_map, qos)
+        node.create_subscription(
+            backend.map_msg_type(), backend.map_topic(), self._on_map, qos
+        )
         log.info(f"[map] source={robot_id} topic={backend.map_topic()}")
 
     def _on_map(self, msg) -> None:
@@ -328,13 +375,20 @@ class MapBridge:
             "width": w,
             "height": h,
             "resolution": msg.info.resolution,
-            "origin": {"x": msg.info.origin.position.x, "y": msg.info.origin.position.y},
+            "origin": {
+                "x": msg.info.origin.position.x,
+                "y": msg.info.origin.position.y,
+            },
             "data": base64.b64encode(zlib.compress(data)).decode(),
         }
         try:
-            r = self._session.post(f"{self.cloud_url}/ingest/map", json=payload, timeout=5.0)
+            r = self._session.post(
+                f"{self.cloud_url}/ingest/map", json=payload, timeout=5.0
+            )
             if r.ok:
-                log.info(f"[map] pushed {w}x{h} @ {msg.info.resolution}m/cell from {self.robot_id}")
+                log.info(
+                    f"[map] pushed {w}x{h} @ {msg.info.resolution}m/cell from {self.robot_id}"
+                )
             else:
                 log.warning(f"[map] push -> {r.status_code}: {r.text[:200]}")
         except Exception as e:
@@ -396,7 +450,9 @@ def main():
 
     robot_bridges = [RobotBridge(cfg, cloud_url, pose_hz, path_hz) for cfg in robots]
 
-    map_source = next((rb for rb in robot_bridges if rb.config.map_source), robot_bridges[0])
+    map_source = next(
+        (rb for rb in robot_bridges if rb.config.map_source), robot_bridges[0]
+    )
     map_bridge = MapBridge(
         map_source.node, map_source.backend, cloud_url, map_source.config.id
     )

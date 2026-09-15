@@ -971,27 +971,52 @@ function getOrCreatePathLine(id) {
 // goal-forwarding -- see ros2_bridge.py's module docstring). Deliberately
 // separate from the legacy single-robot amber goalMarker below, which only
 // ever tracked one robot; this one is per-robot like fleetPathLines.
-const fleetGoalMarkers = new Map(); // robot_id -> mesh
+const fleetGoalMarkers = new Map(); // robot_id -> group (ring + heading arrow)
 
 function getOrCreateGoalMarker(id) {
   let m = fleetGoalMarkers.get(id);
   if (m) return m;
   const color = colorForRobot(id);
-  m = new THREE.Mesh(
-    new THREE.RingGeometry(0.18, 0.28, 32),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide })
-  );
-  m.rotation.x = -Math.PI / 2;
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.18, 0.28, 32), mat);
+  ring.rotation.x = -Math.PI / 2;
+
+  // Flat triangle along local +X ("forward" -- same convention as the
+  // placeholder robot's own body/head layout above) so rotating the group
+  // by the goal's heading shows theta, not just the goal's position.
+  const arrowShape = new THREE.Shape();
+  arrowShape.moveTo(0.30, 0);
+  arrowShape.lineTo(-0.10, 0.14);
+  arrowShape.lineTo(-0.10, -0.14);
+  arrowShape.closePath();
+  const arrow = new THREE.Mesh(new THREE.ShapeGeometry(arrowShape), mat);
+  arrow.rotation.x = -Math.PI / 2;
+
+  m = new THREE.Group();
+  m.add(ring, arrow);
   m.visible = false;
   scene.add(m);
   fleetGoalMarkers.set(id, m);
   return m;
 }
 
+// nav2 stops republishing received_global_plan once a robot is no longer
+// actively navigating (goal reached, canceled, or replaced) -- so "no fresh
+// push in a while" is a reliable, backend-agnostic proxy for "not
+// navigating anymore" without needing a separate subscription to the
+// action server's goal-status topic. path_hz defaults to 4 (a push every
+// ~250ms while active); this is a generous multiple of that to absorb
+// normal jitter without falsely clearing a still-active plan.
+const PATH_STALE_SEC = 2.0;
+
 function updateFleetPaths(pathsDict) {
   const seen = [];
+  const nowSec = Date.now() / 1000;
   for (const id in pathsDict) {
-    const points = (pathsDict[id] && pathsDict[id].points) || [];
+    const entry = pathsDict[id];
+    const fresh = entry && (nowSec - (entry.timestamp || 0)) < PATH_STALE_SEC;
+    const points = (fresh && entry.points) || [];
     seen.push(id);
     const pl = getOrCreatePathLine(id);
     const marker = getOrCreateGoalMarker(id);
@@ -1000,6 +1025,12 @@ function updateFleetPaths(pathsDict) {
       pl.line.visible = true;
       const last = points[points.length - 1];
       marker.position.set(last[0], 0.10, -last[1]);
+      // Same -yaw convention as view.grp.rotation.set(0, -yaw, 0) above,
+      // for the same reason: world yaw is CCW-positive around Z, this
+      // scene's Y is "up" via X=east/Z=-north, so mapping straight to
+      // rotation.y would spin the arrow the wrong way.
+      const theta = (entry.goal_yaw !== undefined && entry.goal_yaw !== null) ? entry.goal_yaw : 0;
+      marker.rotation.y = -theta;
       marker.visible = true;
     } else {
       pl.line.visible = false;
