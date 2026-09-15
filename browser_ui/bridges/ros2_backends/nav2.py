@@ -1,4 +1,4 @@
-"""Nav2 backend -- standard nav2_bringup topic conventions.
+"""Nav2 backend
 
 Each robot's own rclpy.Node is created with namespace=<robot's namespace>
 (see ros2_bridge.py), so these are relative topic names -- ROS2 resolves

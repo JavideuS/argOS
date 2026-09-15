@@ -1,9 +1,7 @@
 """
 Multi-robot ROS2 fleet bridge -- same cloud push contract as nav_bridge.py
 (`X-Robot-Id` header, POST /ingest/pose + /ingest/path) but sourced from
-ROS2 topics/TF via rclpy instead of DimOS/LCM. This is the "ROS2 nav bridge
-alongside DimOS bridge, same interface, different backend" bridge from
-argOS's roadmap.
+ROS2 topics/TF via rclpy instead of DimOS/LCM.
 
 Each robot gets its own namespaced rclpy.Node (see RobotBridge) -- this
 bringup publishes fully separate per-robot TF topics (`/ranger_1/tf`, not a
@@ -11,9 +9,8 @@ shared `/tf`), so a single shared node/buffer couldn't see either robot's
 frames. All nodes share one MultiThreadedExecutor.
 
 Pose comes from TF (`map -> base_footprint`, REP-105/120's standard ground
-frame), not a topic -- true for nav2 and easynav alike, so it isn't part of
-the backend interface (see ros2_backends/base.py). Path and the static map
-are still backend-specific topics.
+frame), not a topic.
+Path and the static map are still backend-specific topics.
 
 v1 is read-only telemetry (pose + path + one shared static map upstream) --
 no goal-forwarding. Goal-setting stays fleet-coordinator's job (mission YAML
@@ -23,6 +20,8 @@ race with its release-gating.
 Costmap ingestion is deliberately not included yet: /ingest/costmap's
 full/delta voxel-update protocol needs its own careful adapter (the static
 map below is push-once, genuinely simpler, and doesn't need it).
+Still thinking on shared map + multi-robot sensor fusion, and independent
+per-robot view.
 
 Standalone:
     python ros2_bridge.py --config ../config/ros2_fleet.example.yaml
@@ -71,8 +70,14 @@ BRIDGE_PASSWORD = os.environ.get("BRIDGE_PASSWORD", "")
 class RobotConfig:
     """One robot's bridge-side parameters.
 
+    fleet_coordinator.coordinator_node publishes each robot's
+    seeded initial pose to `/{mission Robot.id}/initialpose` and looks up
+    its TF the same way -- so a mission robot's `id` *must* equal its real
+    ROS2 namespace or coordinator_node ends up talking to a namespace
+    nothing publishes on.
+
     `robot_radius`/`inflation` default to fleet_coordinator.robot.Robot's
-    own defaults (0.35 / 0.0) so a homogeneous fleet only needs id+namespace;
+    own defaults (0.35 / 0.0) so a homogeneous fleet only needs namespace;
     override per robot for a heterogeneous fleet, or when this bridge needs
     to hand these straight to Spooky later (see fleet-coordinator/robot.py).
     `urdf_path` is carried through for the browser's future 3D render --
@@ -84,11 +89,8 @@ class RobotConfig:
     `map_source` marks this robot's own `/map` as the one the fleet's
     shared static-map layer is pulled from (see MapBridge) -- at most one
     robot should set it; if none do, the first robot in the fleet is used.
-    Real per-robot map merging (independently-explored partial maps) is out
-    of scope here -- see m-explore-ros2 for that, later.
     """
 
-    id: str
     namespace: str
     backend: str = "nav2"
     robot_radius: float = 0.35
@@ -102,11 +104,13 @@ class RobotConfig:
     def __post_init__(self) -> None:
         if self.backend not in BACKENDS:
             raise ValueError(
-                f"robot {self.id!r}: unknown backend {self.backend!r}, "
+                f"robot {self.namespace!r}: unknown backend {self.backend!r}, "
                 f"expected one of {sorted(BACKENDS)}"
             )
         if self.urdf_path and not Path(self.urdf_path).exists():
-            log.warning(f"[{self.id}] urdf_path does not exist: {self.urdf_path}")
+            log.warning(
+                f"[{self.namespace}] urdf_path does not exist: {self.urdf_path}"
+            )
 
 
 def load_fleet_yaml(path: str | Path) -> tuple[dict, list[RobotConfig]]:
@@ -179,7 +183,7 @@ class RobotBridge:
         self._session = requests.Session()
         if BRIDGE_PASSWORD:
             self._session.headers["X-Bridge-Password"] = BRIDGE_PASSWORD
-        self._session.headers["X-Robot-Id"] = config.id
+        self._session.headers["X-Robot-Id"] = config.namespace
 
         # TransformListener always subscribes to the ABSOLUTE topics '/tf'
         # and '/tf_static' (hardcoded in tf2_ros -- this rclpy/tf2_ros
@@ -190,16 +194,16 @@ class RobotBridge:
         # never see anything published under /<namespace>/tf, exactly like
         # `ros2 topic echo /tf` sees nothing here without the equivalent
         # `-r /tf:=/<namespace>/tf` on the CLI. Passing that same remap as
-        # cli_args reproduces it for this node specifically -- matches how
-        # this bringup actually publishes TF: per-robot under its own
-        # namespace, not on one shared /tf.
+        # cli_args reproduces it for this node specifically
         self.node = Node(
-            f"argos_bridge_{config.id}",
+            f"argos_bridge_{config.namespace}",
             namespace=config.namespace,
             cli_args=[
                 "--ros-args",
-                "-r", f"/tf:=/{config.namespace}/tf",
-                "-r", f"/tf_static:=/{config.namespace}/tf_static",
+                "-r",
+                f"/tf:=/{config.namespace}/tf",
+                "-r",
+                f"/tf_static:=/{config.namespace}/tf_static",
             ],
         )
 
@@ -212,28 +216,30 @@ class RobotBridge:
             self.backend.path_msg_type(), path_topic, self._on_path, 10
         )
         log.info(
-            f"[{config.id}] backend={self.backend.name} ns={config.namespace} "
+            f"[{config.namespace}] backend={self.backend.name} ns={config.namespace} "
             f"pose<-TF(map->{config.base_frame}) path<-{path_topic}"
         )
 
     def _push(self, endpoint: str, payload: dict) -> None:
-        # Promoted to WARNING (was DEBUG, invisible under the default INFO
-        # level) -- a bridge that silently drops every push is worse than
-        # one that's noisy about it; found the hard way debugging why one
-        # robot's pose never showed up while the other's did.
+        # A bridge that silently drops every push is worse than
+        # one that's noisy about it.
         try:
             r = self._session.post(
                 f"{self.cloud_url}{endpoint}", json=payload, timeout=1.5
             )
             if not r.ok:
-                log.warning(f"[{self.config.id}] {endpoint} -> {r.status_code}: {r.text[:200]}")
+                log.warning(
+                    f"[{self.config.namespace}] {endpoint} -> {r.status_code}: {r.text[:200]}"
+                )
         except Exception as e:
-            log.warning(f"[{self.config.id}] push {endpoint} failed: {e}")
+            log.warning(f"[{self.config.namespace}] push {endpoint} failed: {e}")
 
     def _poll_pose(self) -> None:
         try:
             tf = self.tf_buffer.lookup_transform(
-                "map", self.config.base_frame, rclpy.time.Time(),
+                "map",
+                self.config.base_frame,
+                rclpy.time.Time(),
                 timeout=Duration(seconds=0.05),
             )
         except tf2_ros.TransformException:
@@ -242,7 +248,7 @@ class RobotBridge:
             return
         if not self._got_pose:
             self._got_pose = True
-            log.info(f"[{self.config.id}] first pose received")
+            log.info(f"[{self.config.namespace}] first pose received")
         now = time.time()
         if now - self._last_pose_push < self._pose_interval:
             return
@@ -272,7 +278,9 @@ class RobotBridge:
     def _on_path(self, msg) -> None:
         if not self._got_path:
             self._got_path = True
-            log.info(f"[{self.config.id}] first path received ({len(msg.poses)} poses)")
+            log.info(
+                f"[{self.config.namespace}] first path received ({len(msg.poses)} poses)"
+            )
         # received_global_plan republishes at nav2_controller's control rate
         # (~20Hz) while a goal is active -- without this, every one of those
         # messages fired a blocking HTTP POST from this callback, which
@@ -282,9 +290,48 @@ class RobotBridge:
         now = time.time()
         if now - self._last_path_push < self._path_interval:
             return
+        # received_global_plan's own poses come stamped in msg.header.frame_id
+        # (this backend: base_link, the robot's own body frame -- NOT map),
+        # so pose.pose.position is relative to wherever the robot currently
+        # is, not world-fixed. Pushed raw, every point renders as if the
+        # robot's own frame origin *is* the map origin -- the plan's shape
+        # still looks right (frame-relative geometry is unaffected) but it
+        # always visually starts at (0, 0) instead of at the robot. Rotate +
+        # translate through map -> frame_id (same "latest available" TF
+        # lookup _poll_pose already uses, for the same extrapolation-safety
+        # reason) to place the plan in world coordinates before pushing.
+        try:
+            tf = self.tf_buffer.lookup_transform(
+                "map",
+                msg.header.frame_id,
+                rclpy.time.Time(),
+                timeout=Duration(seconds=0.05),
+            )
+        except tf2_ros.TransformException:
+            return
         self._last_path_push = now
-        points = [[pose.pose.position.x, pose.pose.position.y] for pose in msg.poses]
-        self._push("/ingest/path", {"path": {"points": points}})
+        tx, ty = tf.transform.translation.x, tf.transform.translation.y
+        yaw = _yaw_from_quaternion(tf.transform.rotation)
+        cos_yaw, sin_yaw = math.cos(yaw), math.sin(yaw)
+        points = []
+        for pose in msg.poses:
+            lx, ly = pose.pose.position.x, pose.pose.position.y
+            points.append(
+                [
+                    tx + lx * cos_yaw - ly * sin_yaw,
+                    ty + lx * sin_yaw + ly * cos_yaw,
+                ]
+            )
+        # Final waypoint's own heading, world-frame -- same rotate-by-yaw as
+        # the positions above, just applied to its orientation instead of
+        # its translation (2D: world_yaw = transform_yaw + local_yaw). Only
+        # the last pose is needed
+        # This drives the goal marker's arrow (theta, not just position),
+        # not the path line itself.
+        goal_yaw = None
+        if msg.poses:
+            goal_yaw = yaw + _yaw_from_quaternion(msg.poses[-1].pose.orientation)
+        self._push("/ingest/path", {"path": {"points": points, "goal_yaw": goal_yaw}})
 
 
 # ── Shared static map (one source robot) ───────────────────────
@@ -292,10 +339,7 @@ class RobotBridge:
 
 class MapBridge:
     """Pushes ONE robot's static /map once (and again if it ever changes) as
-    the fleet's shared map layer. For now every robot's map_server serves
-    the same simulated environment, so there's no need to merge N identical
-    copies -- see m-explore-ros2/multirobot_map_merge for when that stops
-    being true and robots have genuinely different partial maps.
+    the fleet's shared map layer.
 
     Reuses the source robot's own node (already namespaced correctly) rather
     than creating another one.
@@ -310,15 +354,15 @@ class MapBridge:
             self._session.headers["X-Bridge-Password"] = BRIDGE_PASSWORD
 
         # map_server publishes /map latched (TRANSIENT_LOCAL) so a
-        # late-joining subscriber still gets it -- the default QoS a plain
-        # create_subscription(..., 10) gets is RELIABLE+VOLATILE, which is
-        # incompatible and would silently receive nothing.
+        # late-joining subscriber still gets it
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
             depth=1,
         )
-        node.create_subscription(backend.map_msg_type(), backend.map_topic(), self._on_map, qos)
+        node.create_subscription(
+            backend.map_msg_type(), backend.map_topic(), self._on_map, qos
+        )
         log.info(f"[map] source={robot_id} topic={backend.map_topic()}")
 
     def _on_map(self, msg) -> None:
@@ -328,13 +372,20 @@ class MapBridge:
             "width": w,
             "height": h,
             "resolution": msg.info.resolution,
-            "origin": {"x": msg.info.origin.position.x, "y": msg.info.origin.position.y},
+            "origin": {
+                "x": msg.info.origin.position.x,
+                "y": msg.info.origin.position.y,
+            },
             "data": base64.b64encode(zlib.compress(data)).decode(),
         }
         try:
-            r = self._session.post(f"{self.cloud_url}/ingest/map", json=payload, timeout=5.0)
+            r = self._session.post(
+                f"{self.cloud_url}/ingest/map", json=payload, timeout=5.0
+            )
             if r.ok:
-                log.info(f"[map] pushed {w}x{h} @ {msg.info.resolution}m/cell from {self.robot_id}")
+                log.info(
+                    f"[map] pushed {w}x{h} @ {msg.info.resolution}m/cell from {self.robot_id}"
+                )
             else:
                 log.warning(f"[map] push -> {r.status_code}: {r.text[:200]}")
         except Exception as e:
@@ -359,7 +410,7 @@ class FleetSupervisor(Node):
         this URDF's TF tree / no initial pose set. Silence here otherwise
         looks identical to "everything's fine, just no data yet"."""
         self._startup_check_timer.cancel()
-        silent = [rb.config.id for rb in self.robot_bridges if not rb._got_pose]
+        silent = [rb.config.namespace for rb in self.robot_bridges if not rb._got_pose]
         if silent:
             log.warning(
                 f"no pose received yet for: {', '.join(silent)} -- check that "
@@ -396,15 +447,17 @@ def main():
 
     robot_bridges = [RobotBridge(cfg, cloud_url, pose_hz, path_hz) for cfg in robots]
 
-    map_source = next((rb for rb in robot_bridges if rb.config.map_source), robot_bridges[0])
+    map_source = next(
+        (rb for rb in robot_bridges if rb.config.map_source), robot_bridges[0]
+    )
     map_bridge = MapBridge(
-        map_source.node, map_source.backend, cloud_url, map_source.config.id
+        map_source.node, map_source.backend, cloud_url, map_source.config.namespace
     )
 
     supervisor = FleetSupervisor(robot_bridges)
     log.info(
         f"cloud={cloud_url} pose_hz={pose_hz} path_hz={path_hz} "
-        f"robots={[r.id for r in robots]} map_source={map_source.config.id}"
+        f"robots={[r.namespace for r in robots]} map_source={map_source.config.namespace}"
     )
 
     # MultiThreadedExecutor hosting every robot's own node plus the

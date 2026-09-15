@@ -1,5 +1,6 @@
 grove
 .project.yaml
+argOS_context.md
 test_env
 
 __pycache__/
@@ -20,3 +21,8 @@ logs/
 *LOG*
 
 CLAUDE.md
+
+# Robot render models (URDF + meshes) -- large binaries, pulled from Hugging
+# Face on demand instead of committed. See scripts/hf_model_sync.py.
+browser_ui/static/models/*
+!browser_ui/static/models/README.md

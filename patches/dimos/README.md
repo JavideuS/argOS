@@ -1,6 +1,6 @@
 # DimOS patches
 
-Five bug fixes required for stable operation with ArgOS. Apply them on top of a
+Six bug fixes required for stable operation with ArgOS. Apply them on top of a
 clean DimOS checkout before running anything.
 
 ## Apply
@@ -14,7 +14,7 @@ Verify cleanly applied:
 
 ```bash
 git diff --stat HEAD
-# Should show 5 files changed
+# Should show 6 files changed
 ```
 
 If a patch fails (e.g. DimOS updated the surrounding code), apply individually

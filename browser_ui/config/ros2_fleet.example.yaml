@@ -1,10 +1,19 @@
 # Example ros2_bridge.py fleet config.
 
-# `id`/`robot_radius`/`inflation` mirror fleet-coordinator's config/mission.example.yaml shape;
-# `namespace`/`backend`/`urdf_path` are this bridge's own fields.
+# No separate `id:` field -- `namespace` doubles as the robot's id (what
+# argOS pushes as X-Robot-Id, and what ends up in an exported/launched
+# mission YAML's `id:` field). They used to be two separate fields, but
+# fleet_coordinator.coordinator_node publishes a mission robot's seeded
+# initial pose to `/{Robot.id}/initialpose` and looks up its TF the same
+# way -- so a mission robot's id *must* equal its real ROS2 namespace, or
+# coordinator_node ends up talking to a namespace nothing publishes on
+# (silently: "frames in buffer: <none>"). One field makes that impossible
+# instead of just documenting it -- namespace here should be exactly what
+# your nav2 bringup actually uses (ranger_sim1, not a friendlier alias).
+#
 # `robot_radius`/`inflation` default to fleet_coordinator.robot.Robot's own
 # defaults (0.35 / 0.0) when omitted -- a homogeneous fleet only needs
-# id+namespace.
+# namespace.
 #
 # Pose comes from TF (`map -> base_frame`), not a topic -- true for every
 # backend (REP-105/120), so there's no `topics.pose` override. `base_frame`
@@ -33,8 +42,7 @@ cloud_url: http://localhost:8080
 pose_hz: 15.0
 
 robots:
-  - id: ranger_1
-    namespace: ranger_sim1
+  - namespace: ranger_sim1
     backend: nav2
     robot_radius: 0.35
     inflation: 0.1
@@ -42,8 +50,7 @@ robots:
     model: ranger_mini_v3
     map_source: true
 
-  - id: ranger_2
-    namespace: ranger_sim2
+  - namespace: ranger_sim2
     backend: nav2
     robot_radius: 0.35
     inflation: 0.1

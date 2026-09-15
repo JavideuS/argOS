@@ -1,12 +1,9 @@
 """Uniform interface a navigation-stack backend must implement.
 
-Pose is *not* part of this interface -- REP-105/REP-120 make `map` and
-`base_footprint` standard frame names across ROS2 nav stacks (nav2 and
-easynav both publish them), so ros2_bridge.py looks up `map -> base_footprint`
+ros2_bridge.py looks up `map -> base_footprint`
 via TF directly, the same way for every backend, rather than going through a
 backend-specific pose topic. `base_footprint` is specifically the robot's
-ground projection with roll/pitch zeroed -- REP-120's actual ground-truth
-frame, not an ad-hoc height guess.
+ground projection with roll/pitch zeroed (REP-120).
 
 What genuinely differs per nav stack is topic *naming* for path and map, so
 that's what's left here. Adding a new nav stack means adding a new backend

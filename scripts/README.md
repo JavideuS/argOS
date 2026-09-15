@@ -69,6 +69,45 @@ with a direct network connection rather than USB tethering.
 
 ---
 
+## compress_robot_model.py + hf_model_sync.py
+
+Robot render models (URDF + meshes) for the dashboard's 3D view -- see
+`browser_ui/static/models/README.md` for the full workflow. In short:
+
+1. Expand xacro to a flat URDF in a ROS2-sourced shell (argOS itself has no
+   ROS2/xacro dependency, so this always happens elsewhere, once).
+2. `compress_robot_model.py` converts the referenced meshes to `.glb` and
+   drops anything the URDF doesn't reference (stray CAD sources, accidental
+   duplicate copies) in the process.
+3. `hf_model_sync.py push/pull` moves the result to/from a Hugging Face
+   dataset repo. `browser_ui/static/models/` is gitignored -- these binaries
+   never go into git, so the repo doesn't grow with every robot model added
+   to the fleet.
+
+Compression is one-way -- there's no exact path back from `.glb` to the
+original `.dae`/`.stl` (trimesh can't write Collada, and the compressed
+format never retained that structure anyway). That's fine: this HF repo only
+needs to hold the browser-ready copy argOS actually serves. The raw source
+already has a durable home in the ROS package it was expanded from (e.g.
+`ranger_mini3_ros2`) -- go back there if you ever need it, rather than
+treating argOS as a second archive for CAD/mesh assets it doesn't own.
+
+```bash
+python scripts/compress_robot_model.py /tmp/<model>_raw --out browser_ui/static/models/<model>
+python scripts/hf_model_sync.py push <model> --repo <namespace>/argos-robot-models
+python scripts/hf_model_sync.py pull <model> --repo <namespace>/argos-robot-models
+```
+
+Requires: `trimesh`, `huggingface_hub`, and a HF token with write access to
+the target repo (`huggingface-cli login` or `$HF_TOKEN`).
+
+New HF repos are created **private** by default (`--public` to opt out).
+Check the license of the source model before publishing it -- especially
+manufacturer-provided CAD/mesh assets (e.g. AgileX Ranger) you didn't author
+yourself.
+
+---
+
 ## run_robohack.sh
 
 Startup script used during the hackathon to launch DimOS and the bridges in
