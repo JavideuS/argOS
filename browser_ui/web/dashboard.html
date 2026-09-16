@@ -872,9 +872,10 @@ function _renderStaticMap(m) {
 
   if (_staticMapTex) _staticMapTex.dispose();
   _staticMapTex = new THREE.DataTexture(rgba, w, h, THREE.RGBAFormat);
-  // OccupancyGrid row 0 is the grid origin (bottom-left in map frame). If
-  // the map looks vertically mirrored once real data loads, flip this.
-  _staticMapTex.flipY = true;
+  // Was true -- confirmed vertically mirrored (bottom rendered at top).
+  // The costmap heatmap builds its texture the same row-major way (row 0 =
+  // grid row 0 = map origin) and uses flipY = false; matching that here.
+  _staticMapTex.flipY = false;
   _staticMapTex.needsUpdate = true;
 
   const planeW = w * m.resolution;
