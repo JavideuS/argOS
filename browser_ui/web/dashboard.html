@@ -69,6 +69,77 @@
     .fleet-row { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
     .fleet-swatch { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
 
+    /* ── Plan Mission mode: top-down 2D camera + robot-row editor ──── */
+    #plan-mode-toggle { position: absolute; top: 10px; right: 140px; z-index: 10;
+                         font-size: 11px; padding: 4px 10px; border-radius: 12px;
+                         background: rgba(13,17,23,0.85); border: 1px solid #1e2d3d;
+                         color: #4fc3f7; cursor: pointer; }
+    #plan-mode-toggle:hover { border-color: #4fc3f7; }
+    #plan-mode-toggle.active { background: #12324a; border-color: #4fc3f7; }
+
+    #sidebar.plan-active > :not(#mission-panel) { display: none; }
+    #mission-panel { display: none; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+    #sidebar.plan-active #mission-panel { display: flex; }
+    #mission-hint { padding: 0 12px 8px; font-size: 10px; color: #ffb74d; min-height: 12px; }
+    .mission-toolbar { display: flex; gap: 6px; margin-top: 6px; }
+    #add-robot-select { flex: 1; padding: 5px 6px; font-size: 11px; border-radius: 6px;
+                         border: 1px solid #1e2d3d; background: #0d1117; color: #4fc3f7; }
+    #sync-robot-btn { padding: 5px 8px; font-size: 11px; border-radius: 6px;
+                       border: 1px solid #1e2d3d; background: transparent; color: #99a; cursor: pointer; }
+    #sync-robot-btn:hover { border-color: #4fc3f7; color: #4fc3f7; }
+    .robot-row-header input[readonly] { opacity: 0.8; cursor: default; }
+    .robot-row-header .live-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .robot-row-header .live-dot.live { background: #81c784; box-shadow: 0 0 4px #81c784; }
+    .robot-row-header .live-dot.offline { background: #555; }
+    #mission-rows { flex: 1 1 auto; overflow-y: auto; padding: 0 12px 12px; }
+    .robot-row { border: 1px solid #1e2d3d; border-radius: 8px; padding: 8px;
+                 margin-bottom: 8px; background: #0d1117; }
+    .robot-row-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .robot-row-badge { width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0;
+                        display: flex; align-items: center; justify-content: center; font-size: 10px; }
+    .robot-row-header input[type=text] { flex: 1; background: #080c10; border: 1px solid #1e2d3d;
+                                          color: #dde; border-radius: 4px; padding: 4px 6px; font-size: 11px; }
+    .robot-row .remove-btn { background: none; border: none; color: #667; cursor: pointer;
+                              font-size: 15px; padding: 0 4px; line-height: 1; }
+    .robot-row .remove-btn:hover { color: #ef5350; }
+    .robot-row .pose-label { font-size: 9px; color: #789; text-transform: uppercase;
+                              letter-spacing: 0.06em; margin: 4px 0 2px; }
+    .robot-row .pose-group { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+    .robot-row .pose-group label { font-size: 9px; color: #667; display: block; margin-bottom: 1px; }
+    .robot-row .pose-group input { width: 100%; background: #080c10; border: 1px solid #1e2d3d;
+                                    color: #dde; border-radius: 4px; padding: 3px 4px; font-size: 10px; }
+    .robot-row .extra-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; margin-top: 4px; }
+    .robot-row .pick-row { display: flex; gap: 6px; margin-top: 6px; }
+    .pick-btn { flex: 1; font-size: 10px; padding: 5px 0; border-radius: 5px; border: 1px solid #1e2d3d;
+                background: transparent; color: #99a; cursor: pointer; }
+    .pick-btn:hover { border-color: #4fc3f7; color: #4fc3f7; }
+    .pick-btn.active { background: #12324a; border-color: #4fc3f7; color: #4fc3f7; }
+    .pick-btn.goal-btn.active { background: #1e3a1e; border-color: #4fd1a5; color: #4fd1a5; }
+    #mission-actions { display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid #1e2d3d; flex-shrink: 0; }
+    #mission-actions button { flex: 1; font-size: 11px; padding: 7px 0; border-radius: 6px;
+                               border: 1px solid #1e2d3d; background: #12324a; color: #4fc3f7;
+                               cursor: pointer; font-weight: 600; }
+    #mission-actions button:hover { border-color: #4fc3f7; }
+    #export-mission-btn { background: #1e3a1e !important; color: #81c784 !important; }
+
+    #launch-section { border-top: 1px solid #1e2d3d; padding: 8px 12px 12px; flex-shrink: 0; }
+    #launch-section .section-title { margin-bottom: 4px; }
+    .launch-row { display: flex; align-items: center; gap: 6px; font-size: 11px;
+                  color: #ccd; margin: 6px 0; }
+    .launch-row input[type=text] { flex: 1; background: #0d1117; border: 1px solid #1e2d3d;
+                                    color: #dde; border-radius: 4px; padding: 4px 6px; font-size: 11px; }
+    #launch-status { font-size: 10px; color: #99a; min-height: 14px; margin: 4px 0; }
+    #launch-status.running { color: #81c784; }
+    #launch-status.error { color: #ef9a9a; }
+    #launch-buttons { display: flex; gap: 6px; }
+    #launch-buttons button { flex: 1; font-size: 11px; padding: 7px 0; border-radius: 6px;
+                              border: 1px solid #1e2d3d; cursor: pointer; font-weight: 600; }
+    #launch-btn { background: #123a1e; color: #81c784; }
+    #launch-btn:hover { border-color: #81c784; }
+    #launch-btn:disabled { opacity: 0.5; cursor: default; }
+    #stop-mission-btn { background: #3a1414; color: #ef9a9a; }
+    #stop-mission-btn:hover { border-color: #ef9a9a; }
+
     #sidebar { display: flex; flex-direction: column; border-left: 1px solid #1e2d3d;
                overflow: hidden; }
     .section { padding: 9px 12px; border-bottom: 1px solid #1e2d3d; flex-shrink: 0; }
@@ -225,6 +296,7 @@
     <div id="nav-status"></div>
     <div id="view-hint">drag to orbit · scroll to zoom · click floor to navigate</div>
     <button id="map-view-toggle" onclick="window._toggleMapView()" title="Switch between lidar pointcloud and costmap heatmap">☁️ Pointcloud</button>
+    <button id="plan-mode-toggle" onclick="window._togglePlanMode()" title="Set robot start/goal poses on a top-down 2D map">📐 Plan Mission</button>
     <div id="hm-legend">
       <div class="hm-row"><div class="hm-swatch" style="background:rgba(50,220,160,0.8)"></div>Safe (low cost)</div>
       <div class="hm-row"><div class="hm-swatch" style="background:rgba(255,210,0,0.9)"></div>Caution</div>
@@ -249,6 +321,36 @@
                onkeydown="if(event.key==='Enter')window._chat()">
         <button id="mic-btn" onclick="window._mic()" title="Voice input">🎤</button>
         <button id="send-btn" onclick="window._chat()">Ask</button>
+      </div>
+    </div>
+    <div id="mission-panel">
+      <div class="section" style="border-bottom:1px solid #1e2d3d;">
+        <div class="section-title">Plan Mission</div>
+        <div id="mission-hint">Pick a robot below, click "pick start" or "pick goal", then click-and-drag on the map to set position + heading.</div>
+        <div class="mission-toolbar">
+          <select id="add-robot-select" onchange="if(this.value){window._addMissionRobot(this.value); this.value='';}">
+            <option value="">+ add detected robot...</option>
+          </select>
+          <button id="sync-robot-btn" onclick="window._syncDraftFromFleet()" title="Refresh start poses from each robot's current live position">🔄 Sync poses</button>
+        </div>
+      </div>
+      <div id="mission-rows"></div>
+      <div id="mission-actions">
+        <button id="export-mission-btn" onclick="window._exportMission()">⬇ Export mission.yaml</button>
+      </div>
+      <div id="launch-section">
+        <div class="section-title">Launch (step 2)</div>
+        <label class="launch-row"><input type="checkbox" id="launch-sim-time" checked /> use_sim_time</label>
+        <label class="launch-row"><input type="checkbox" id="launch-initial-pose" checked /> publish initial pose (AMCL pose-estimate)</label>
+        <div class="launch-row">
+          <label style="flex:0 0 auto;">spooky.map_id</label>
+          <input type="text" id="launch-map-id" placeholder="e.g. test-scenario_simple" />
+        </div>
+        <div id="launch-status"></div>
+        <div id="launch-buttons">
+          <button id="launch-btn" onclick="window._launchMission()">🚀 Launch</button>
+          <button id="stop-mission-btn" onclick="window._stopMission()" style="display:none;">⏹ Stop</button>
+        </div>
       </div>
     </div>
     <!-- Vertical drag handle — chat ↕ camera/objects -->
@@ -642,6 +744,66 @@ controls.maxPolarAngle = Math.PI * 0.47;
 controls.minDistance = 0.3;
 controls.maxDistance = 150;
 
+// ── 2D top-down camera (Plan Mission mode) ──────────────────────
+// A real orthographic camera, not just the 3D one tilted flat -- no
+// perspective skew, so clicking to place a pose is pixel-accurate the same
+// way RViz's 2D tools are. Framed to the static map's bounds once one
+// loads (see _renderStaticMap); a sane default otherwise.
+const camera2D = new THREE.OrthographicCamera(-10, 10, 10, -10, 0.1, 500);
+camera2D.position.set(0, 50, 0);
+camera2D.up.set(0, 0, -1); // screen-up = -Z = +world Y (north) -- flip here if it reads mirrored
+camera2D.lookAt(0, 0, 0);
+
+const controls2D = new OrbitControls(camera2D, renderer.domElement);
+controls2D.enableRotate = false; // pan + zoom only -- this view stays straight-down on purpose
+controls2D.screenSpacePanning = true;
+controls2D.enabled = false;
+
+let activeCamera = camera;
+let _planMode = false;
+
+function _frameCamera2DToMap() {
+  const w = _staticMapPlane ? _staticMapPlane.geometry.parameters.width : 20;
+  const h = _staticMapPlane ? _staticMapPlane.geometry.parameters.height : 20;
+  const cx = _staticMapPlane ? _staticMapPlane.position.x : 0;
+  const cz = _staticMapPlane ? _staticMapPlane.position.z : 0;
+  const aspect = panel.clientWidth / Math.max(1, panel.clientHeight);
+  const halfSpan = Math.max(w, h) / 2 * 1.15 + 1; // small margin around the map
+  camera2D.top = halfSpan; camera2D.bottom = -halfSpan;
+  camera2D.left = -halfSpan * aspect; camera2D.right = halfSpan * aspect;
+  camera2D.position.set(cx, 50, cz);
+  camera2D.updateProjectionMatrix();
+  controls2D.target.set(cx, 0, cz);
+  controls2D.update();
+}
+
+function _togglePlanMode() {
+  _planMode = !_planMode;
+  document.getElementById('plan-mode-toggle').classList.toggle('active', _planMode);
+  document.getElementById('sidebar').classList.toggle('plan-active', _planMode);
+  if (_planMode) {
+    _frameCamera2DToMap();
+    activeCamera = camera2D;
+    controls.enabled = false;
+    controls2D.enabled = true;
+    if (!missionDraft.robots.length) {
+      // Seed from every currently-detected robot -- the common case is
+      // "plan a mission for the fleet that's actually connected right now."
+      Array.from(fleetRobots.keys()).forEach(function(id) { _addMissionRobot(id); });
+    } else {
+      _refreshAddRobotSelect();
+    }
+  } else {
+    _exitPicking();
+    activeCamera = camera;
+    controls2D.enabled = false;
+    controls.enabled = true;
+  }
+  _refreshAllMissionMarkers();
+  _fitRendererToPanel();
+}
+window._togglePlanMode = _togglePlanMode;
+
 // Auto-rotate the camera as a hint, but stop **permanently** after the
 // first user interaction (drag, scroll, click) — no resume timer.
 let _userInteracted = false;
@@ -697,12 +859,15 @@ function _renderStaticMap(m) {
   const rgba = new Uint8Array(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const bucket = bin.charCodeAt(i);
-    let v, a;
-    if (bucket === 1)      { v = 25;  a = 255; }  // occupied -- dark
-    else if (bucket === 2) { v = 110; a = 130; }  // unknown -- translucent gray
-    else                   { v = 232; a = 255; }  // free -- light
+    let v;
+    // Standard ROS map_server PGM convention, not an arbitrary ramp:
+    // black=occupied, white=free, 205=unknown (the actual gray value
+    // map_saver writes), fully opaque like a real .pgm has no alpha at all.
+    if (bucket === 1)      v = 0;    // occupied -- black
+    else if (bucket === 2) v = 205;  // unknown -- ROS's standard PGM gray
+    else                   v = 254;  // free -- white
     const di = i * 4;
-    rgba[di] = v; rgba[di + 1] = v; rgba[di + 2] = v; rgba[di + 3] = a;
+    rgba[di] = v; rgba[di + 1] = v; rgba[di + 2] = v; rgba[di + 3] = 255;
   }
 
   if (_staticMapTex) _staticMapTex.dispose();
@@ -721,6 +886,20 @@ function _renderStaticMap(m) {
     const mat = new THREE.MeshBasicMaterial({
       map: _staticMapTex, transparent: true, side: THREE.DoubleSide, depthWrite: false
     });
+    // Without this, the renderer's ACESFilmicToneMapping (set globally
+    // below for the 3D scene's lit materials) runs this texture through
+    // its highlight-compression curve too -- true white (254) comes out a
+    // muted gray while true black (0) stays anchored, which is exactly
+    // "everything grayish except black obstacles". A flat PGM-style map
+    // should render its authored colors as-is, not get cinematic grading.
+    mat.toneMapped = false;
+    // Second, separate effect: scene.fog is a dark FogExp2 tuned for the
+    // close-up 3D view. The 2D camera sits 50 units straight up (see
+    // _frameCamera2DToMap), and at that distance FogExp2's falloff blends
+    // the map most of the way toward the fog color regardless of
+    // toneMapped -- fog and tone mapping are independent effects, fixing
+    // one doesn't fix the other.
+    mat.fog = false;
     _staticMapPlane = new THREE.Mesh(new THREE.PlaneGeometry(planeW, planeH), mat);
     _staticMapPlane.rotation.x = -Math.PI / 2;
     _staticMapPlane.position.set(cx, 0.005, -cy); // above floor (-0.002), below everything else
@@ -779,9 +958,26 @@ function createPlaceholderRobot(color) {
   // Procedural Go2-style quadruped, tinted per-robot. Local axes:
   // +X = forward (heading), +Y = up, +Z = right.
   const grp = new THREE.Group();
-  const matBody  = new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.4 });
+  // metalness pulls part of a MeshStandardMaterial's response from
+  // environment-map reflections; this scene has no envMap, so that part
+  // rendered near-black instead of falling back to the base color -- barely
+  // visible from the 3D view's grazing angles, obvious from the 2D
+  // camera's straight-down one. metalness: 0 removes that dependency, and
+  // a modest self-tint (emissive: color) means the body still reads as its
+  // assigned color even in a lighting angle this wasn't tuned for.
+  const matBody  = new THREE.MeshStandardMaterial({
+    color, emissive: color, emissiveIntensity: 0.35, roughness: 0.6, metalness: 0.0,
+  });
   const matLight = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: color, emissiveIntensity: 0.8 });
   const matLeg   = new THREE.MeshStandardMaterial({ color: 0x111418, roughness: 0.7 });
+  // Fog fix, still needed independently of the above -- see path-line/map
+  // comments elsewhere: fine at the 3D view's typical few-units distance,
+  // but the 2D camera sits 50 units up, where fog's blend toward its own
+  // dark color would otherwise dominate regardless of the material's own
+  // color/lighting response.
+  matBody.fog = false;
+  matLight.fog = false;
+  matLeg.fog = false;
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.50, 0.16, 0.22), matBody);
   grp.add(body);
@@ -807,10 +1003,10 @@ function createPlaceholderRobot(color) {
   }
   const legs = [addLeg(0.20, 0.10), addLeg(0.20, -0.10), addLeg(-0.20, 0.10), addLeg(-0.20, -0.10)]; // FL,FR,BL,BR
 
-  const ring = new THREE.Mesh(
-    new THREE.RingGeometry(0.32, 0.45, 36),
-    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide })
-  );
+  const ringMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.22, side: THREE.DoubleSide });
+  ringMat.toneMapped = false; // same MeshBasicMaterial fix as the map/path/marker materials
+  ringMat.fog = false;
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.45, 36), ringMat);
   ring.rotation.x = -Math.PI / 2;
   ring.position.y = -0.30;
   grp.add(ring);
@@ -915,6 +1111,9 @@ function updateFleetRobots(poseDict) {
     view.x = p.x; view.y = p.y; view.z = p.z || 0;
     view.speed = Math.hypot(view.x - view.lastX, view.y - view.lastY);
     const yaw = (p.yaw !== undefined) ? p.yaw : 0;
+    view.yaw = yaw; // exposed so Plan Mission can seed a start pose from where the robot actually is
+    if (p.robot_radius !== undefined) view.robot_radius = p.robot_radius;
+    if (p.inflation !== undefined) view.inflation = p.inflation;
     // Three.js: world axes are X=east, Y=up, Z=south. We use X=robot-X, Z=-robot-Y.
     // Ground level (y=0) -- any per-mesh height lift lives on that mesh's
     // own subgroup (see placeholder.grp.position.y above), not here.
@@ -943,6 +1142,25 @@ function updateFleetRobots(poseDict) {
       return id + ' (' + v.x.toFixed(1) + ',' + v.y.toFixed(1) + ')';
     }).join('  ·  ');
   }
+  _onLiveFleetChanged(seen);
+}
+
+// Keeps Plan Mission's "add detected robot" list and each row's live-dot
+// current as robots connect/disconnect -- but only on an actual set
+// change, not every pose poll (10Hz), which would otherwise blow away
+// whatever the user is mid-typing in a row every ~100ms.
+let _lastLiveIdKey = '';
+function _onLiveFleetChanged(seen) {
+  if (!_planMode) return;
+  const key = seen.slice().sort().join(',');
+  if (key === _lastLiveIdKey) return;
+  _lastLiveIdKey = key;
+  _refreshAddRobotSelect();
+  document.querySelectorAll('.robot-row').forEach(function(row) {
+    const r = missionDraft.robots[parseInt(row.dataset.idx, 10)];
+    const dot = row.querySelector('.live-dot');
+    if (r && dot) dot.className = 'live-dot ' + (fleetRobots.has(r.id) ? 'live' : 'offline');
+  });
 }
 
 // ── Fleet path overlay ───────────────────────────────────────────
@@ -956,7 +1174,15 @@ function getOrCreatePathLine(id) {
   if (pl) return pl;
   const color = colorForRobot(id);
   const geo = new THREE.BufferGeometry();
-  const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 }));
+  const mat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
+  // Same fix as the static map / heatmap materials: without this, fog and
+  // ACESFilmicToneMapping (both tuned for the close-up 3D scene) wash a
+  // bright per-robot hue down toward the dark fog color, especially from
+  // the 2D top-down camera sitting 50 units up -- reads as "paths are
+  // black" even though colorForRobot() picked a real bright color.
+  mat.toneMapped = false;
+  mat.fog = false;
+  const line = new THREE.Line(geo, mat);
   line.visible = false;
   scene.add(line);
   pl = { geo, line };
@@ -1201,9 +1427,11 @@ const CLICK_PX = 6;
 const CLICK_MS = 350;
 
 renderer.domElement.addEventListener('pointerdown', function(e) {
+  if (_planMode) return; // Plan Mission mode has its own click-to-pick handlers below
   _downX = e.clientX; _downY = e.clientY; _downT = Date.now(); _downBtn = e.button;
 });
 renderer.domElement.addEventListener('pointerup', async function(e) {
+  if (_planMode) return;
   if (_downBtn !== 0 || e.button !== 0) return;            // primary button only
   const dx = e.clientX - _downX, dy = e.clientY - _downY;
   const dist = Math.hypot(dx, dy);
@@ -1237,6 +1465,370 @@ function _showNav(msg, err) {
   clearTimeout(el._t);
   el._t = setTimeout(function() { el.classList.remove('show'); }, 3000);
 }
+
+// ── Plan Mission mode: visual multi-robot mission editor ───────
+// Produces a mission.yaml matching fleet_coordinator.robot.Fleet.from_yaml
+// field-for-field (verified by round-tripping an export through the real
+// Fleet.from_yaml, not just assumed). Authoring-time only -- doesn't talk
+// to any robot directly; *running* a mission (including seeding
+// /initialpose from each robot's declared start) stays fleet-coordinator's
+// job, same as today, not a second path into execution.
+//
+// Robots here are never invented -- Spooky needs a real, detectable robot
+// per id, so every draft entry's id comes from fleetRobots (the same set
+// driving the legend), not free text. Adding pulls from what's currently
+// live; "sync" re-pulls a start pose from wherever that robot actually is
+// now, in case time passed between opening Plan Mode and finishing a draft.
+
+const missionDraft = { robots: [] }; // [{id, start:{x,y,theta}, goal:{x,y,theta}, robot_radius, priority, inflation}]
+const missionMarkers = new Map();    // robot index -> {startGrp, goalGrp}
+
+// Rounds to 3dp and returns a real number (not a string) -- live pose data
+// comes through with float noise (e.g. 4.999837261...) that's meaningless
+// past mm precision and was cluttering every numeric field.
+function _round3(v) { return Math.round(v * 1000) / 1000; }
+
+function _addMissionRobot(id) {
+  if (!id || missionDraft.robots.some(function(r) { return r.id === id; })) return;
+  const live = fleetRobots.get(id);
+  missionDraft.robots.push({
+    id,
+    start: live ? {x: _round3(live.x), y: _round3(live.y), theta: _round3(live.yaw || 0)} : {x: 0, y: 0, theta: 0},
+    goal: live ? {x: _round3(live.x), y: _round3(live.y), theta: _round3(live.yaw || 0)} : {x: 0, y: 0, theta: 0},
+    robot_radius: live && live.robot_radius !== undefined ? live.robot_radius : 0.35,
+    inflation: live && live.inflation !== undefined ? live.inflation : 0.0,
+    priority: 1.0,
+  });
+  renderMissionRows();
+}
+window._addMissionRobot = _addMissionRobot;
+
+function _syncDraftFromFleet() {
+  let synced = 0;
+  missionDraft.robots.forEach(function(r, idx) {
+    const live = fleetRobots.get(r.id);
+    if (!live) return;
+    r.start.x = _round3(live.x); r.start.y = _round3(live.y); r.start.theta = _round3(live.yaw || 0);
+    if (live.robot_radius !== undefined) r.robot_radius = live.robot_radius;
+    if (live.inflation !== undefined) r.inflation = live.inflation;
+    _updateMissionMarker(idx);
+    synced++;
+  });
+  renderMissionRows();
+  _showNav(synced ? ('Synced ' + synced + " robot's start pose(s) from live data") : 'No draft robots are currently live');
+}
+window._syncDraftFromFleet = _syncDraftFromFleet;
+
+function _refreshAddRobotSelect() {
+  const sel = document.getElementById('add-robot-select');
+  if (!sel) return;
+  const draftIds = new Set(missionDraft.robots.map(function(r) { return r.id; }));
+  const available = Array.from(fleetRobots.keys()).filter(function(id) { return !draftIds.has(id); });
+  sel.innerHTML = '<option value="">+ add detected robot...</option>' +
+    available.map(function(id) { return '<option value="' + id + '">' + id + '</option>'; }).join('');
+  sel.disabled = available.length === 0;
+}
+
+// ── Draft markers (flat, 2D-view-friendly: ring+arrow=start, diamond+arrow=goal) ──
+function _makeMissionMarker(color, ringGeo) {
+  const grp = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
+  // Same fix as the map/heatmap/path-line materials -- these are viewed
+  // from the same 2D top-down camera, same washing-out otherwise.
+  mat.toneMapped = false;
+  mat.fog = false;
+  const body = new THREE.Mesh(ringGeo, mat);
+  body.rotation.x = -Math.PI / 2;
+  grp.add(body);
+  const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.32, 12), mat);
+  arrow.rotation.z = -Math.PI / 2; // points +X (this scene's "forward"), matching theta=0
+  arrow.position.x = 0.32;
+  grp.add(arrow);
+  grp.visible = false;
+  scene.add(grp);
+  return grp;
+}
+
+function _getOrCreateMissionMarkers(idx) {
+  let m = missionMarkers.get(idx);
+  if (m) return m;
+  const r = missionDraft.robots[idx];
+  const color = colorForRobot(r.id);
+  const startGrp = _makeMissionMarker(color, new THREE.RingGeometry(0.16, 0.24, 24));
+  const goalGrp = _makeMissionMarker(color, new THREE.OctahedronGeometry(0.18, 0));
+  m = { startGrp, goalGrp };
+  missionMarkers.set(idx, m);
+  return m;
+}
+
+function _updateMissionMarker(idx) {
+  const r = missionDraft.robots[idx];
+  if (!r) return;
+  const m = _getOrCreateMissionMarkers(idx);
+  m.startGrp.position.set(r.start.x, 0.10, -r.start.y);
+  m.startGrp.rotation.set(0, -r.start.theta, 0);
+  m.startGrp.visible = _planMode;
+  m.goalGrp.position.set(r.goal.x, 0.10, -r.goal.y);
+  m.goalGrp.rotation.set(0, -r.goal.theta, 0);
+  m.goalGrp.visible = _planMode;
+}
+
+function _refreshAllMissionMarkers() {
+  missionDraft.robots.forEach(function(_, idx) { _updateMissionMarker(idx); });
+}
+
+function _removeMissionMarkers(idx) {
+  const m = missionMarkers.get(idx);
+  if (!m) return;
+  scene.remove(m.startGrp);
+  scene.remove(m.goalGrp);
+  missionMarkers.delete(idx);
+}
+
+// ── Robot rows sidebar ──────────────────────────────────────────
+function renderMissionRows() {
+  const container = document.getElementById('mission-rows');
+  container.innerHTML = '';
+  missionDraft.robots.forEach(function(r, idx) {
+    const color = colorForRobot(r.id);
+    const isLive = fleetRobots.has(r.id);
+    const row = document.createElement('div');
+    row.className = 'robot-row';
+    row.dataset.idx = String(idx);
+    row.innerHTML =
+      '<div class="robot-row-header">' +
+        '<span class="robot-row-badge" style="background:#' + color.getHexString() + '">🤖</span>' +
+        '<input type="text" value="' + r.id + '" readonly title="Robot id -- fixed to whatever the bridge actually reports, not editable here" />' +
+        '<span class="live-dot ' + (isLive ? 'live' : 'offline') + '" title="' + (isLive ? 'Currently reporting' : 'Not currently live') + '"></span>' +
+        '<button type="button" class="remove-btn" title="Remove robot">×</button>' +
+      '</div>' +
+      '<div class="pose-label">Start</div>' +
+      '<div class="pose-group">' +
+        '<div><label>x</label><input type="number" step="0.1" data-field="start.x" value="' + _round3(r.start.x) + '" /></div>' +
+        '<div><label>y</label><input type="number" step="0.1" data-field="start.y" value="' + _round3(r.start.y) + '" /></div>' +
+        '<div><label>&theta; (rad)</label><input type="number" step="0.1" data-field="start.theta" value="' + _round3(r.start.theta) + '" /></div>' +
+      '</div>' +
+      '<div class="pose-label">Goal</div>' +
+      '<div class="pose-group">' +
+        '<div><label>x</label><input type="number" step="0.1" data-field="goal.x" value="' + _round3(r.goal.x) + '" /></div>' +
+        '<div><label>y</label><input type="number" step="0.1" data-field="goal.y" value="' + _round3(r.goal.y) + '" /></div>' +
+        '<div><label>&theta; (rad)</label><input type="number" step="0.1" data-field="goal.theta" value="' + _round3(r.goal.theta) + '" /></div>' +
+      '</div>' +
+      '<div class="extra-group">' +
+        '<div><label style="font-size:9px;color:#667;">radius (m)</label><input type="number" step="0.05" min="0.05" data-field="robot_radius" value="' + _round3(r.robot_radius) + '" /></div>' +
+        '<div><label style="font-size:9px;color:#667;">inflation (m)</label><input type="number" step="0.05" min="0" data-field="inflation" value="' + _round3(r.inflation) + '" /></div>' +
+        '<div><label style="font-size:9px;color:#667;">priority</label><input type="number" step="0.1" data-field="priority" value="' + _round3(r.priority) + '" /></div>' +
+      '</div>' +
+      '<div class="pick-row">' +
+        '<button type="button" class="pick-btn" data-pick="start">📍 pick start</button>' +
+        '<button type="button" class="pick-btn goal-btn" data-pick="goal">🏁 pick goal</button>' +
+      '</div>';
+
+    row.querySelectorAll('input[data-field]').forEach(function(input) {
+      input.addEventListener('input', function() {
+        const field = input.dataset.field;
+        const val = parseFloat(input.value);
+        if (Number.isNaN(val)) return;
+        if (field === 'start.x') r.start.x = val;
+        else if (field === 'start.y') r.start.y = val;
+        else if (field === 'start.theta') r.start.theta = val;
+        else if (field === 'goal.x') r.goal.x = val;
+        else if (field === 'goal.y') r.goal.y = val;
+        else if (field === 'goal.theta') r.goal.theta = val;
+        else if (field === 'robot_radius') r.robot_radius = val;
+        else if (field === 'inflation') r.inflation = val;
+        else if (field === 'priority') r.priority = val;
+        _updateMissionMarker(idx);
+      });
+    });
+    row.querySelector('.remove-btn').addEventListener('click', function() {
+      if (_picking && _picking.idx === idx) _exitPicking();
+      _removeMissionMarkers(idx);
+      missionDraft.robots.splice(idx, 1);
+      // Re-key remaining markers down by one index each, matching the splice.
+      const remapped = new Map();
+      missionMarkers.forEach(function(v, k) { remapped.set(k > idx ? k - 1 : k, v); });
+      missionMarkers.clear();
+      remapped.forEach(function(v, k) { missionMarkers.set(k, v); });
+      renderMissionRows();
+    });
+    row.querySelectorAll('.pick-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { _setPicking(idx, btn.dataset.pick); });
+    });
+    container.appendChild(row);
+    _updateMissionMarker(idx);
+  });
+  _updatePickingUI();
+  _refreshAddRobotSelect();
+}
+
+// ── Click-and-drag pick: click sets position, drag sets heading, release
+// finalizes -- same gesture as nav2's 2D Pose Estimate / 2D Nav Goal, and
+// one-shot like them (picking mode turns itself off after one placement). ──
+let _picking = null;       // {idx, field}
+let _pickDragging = false;
+const _pickPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const _pickPt = new THREE.Vector3();
+
+function _setPicking(idx, field) {
+  if (_picking && _picking.idx === idx && _picking.field === field) { _exitPicking(); return; }
+  _picking = { idx, field };
+  controls2D.enabled = false; // a plain drag during picking sets heading, not pan/zoom
+  _updatePickingUI();
+}
+
+function _exitPicking() {
+  _picking = null;
+  _pickDragging = false;
+  if (_planMode) controls2D.enabled = true;
+  _updatePickingUI();
+}
+
+function _updatePickingUI() {
+  document.querySelectorAll('.pick-btn').forEach(function(b) { b.classList.remove('active'); });
+  const hint = document.getElementById('mission-hint');
+  if (!hint) return;
+  if (_picking) {
+    const r = missionDraft.robots[_picking.idx];
+    const label = r ? r.id : '';
+    const btn = document.querySelector('.robot-row[data-idx="' + _picking.idx + '"] .pick-btn[data-pick="' + _picking.field + '"]');
+    if (btn) btn.classList.add('active');
+    hint.textContent = 'Click-and-drag on the map to set ' + label + "'s " + _picking.field + ' (drag sets heading).';
+  } else {
+    hint.textContent = 'Pick a robot below, click "pick start" or "pick goal", then click-and-drag on the map to set position + heading.';
+  }
+}
+
+function _pickWorldPoint(clientX, clientY) {
+  const r = renderer.domElement.getBoundingClientRect();
+  m2.x =  ((clientX - r.left) / r.width)  * 2 - 1;
+  m2.y = -((clientY - r.top)  / r.height) * 2 + 1;
+  ray.setFromCamera(m2, camera2D);
+  if (!ray.ray.intersectPlane(_pickPlane, _pickPt)) return null;
+  return { x: _pickPt.x, y: -_pickPt.z };
+}
+
+function _syncPoseInputs(idx, field) {
+  const row = document.querySelector('.robot-row[data-idx="' + idx + '"]');
+  if (!row) return;
+  const pose = missionDraft.robots[idx][field];
+  ['x', 'y', 'theta'].forEach(function(k) {
+    const input = row.querySelector('input[data-field="' + field + '.' + k + '"]');
+    if (input) input.value = pose[k];
+  });
+}
+
+renderer.domElement.addEventListener('pointerdown', function(e) {
+  if (!_planMode || !_picking || e.button !== 0) return;
+  const p = _pickWorldPoint(e.clientX, e.clientY);
+  if (!p) return;
+  _pickDragging = true;
+  const pose = missionDraft.robots[_picking.idx][_picking.field];
+  pose.x = _round3(p.x); pose.y = _round3(p.y);
+  _syncPoseInputs(_picking.idx, _picking.field);
+  _updateMissionMarker(_picking.idx);
+});
+renderer.domElement.addEventListener('pointermove', function(e) {
+  if (!_planMode || !_picking || !_pickDragging) return;
+  const p = _pickWorldPoint(e.clientX, e.clientY);
+  if (!p) return;
+  const pose = missionDraft.robots[_picking.idx][_picking.field];
+  const dx = p.x - pose.x, dy = p.y - pose.y;
+  if (Math.hypot(dx, dy) > 0.05) pose.theta = _round3(Math.atan2(dy, dx));
+  _syncPoseInputs(_picking.idx, _picking.field);
+  _updateMissionMarker(_picking.idx);
+});
+renderer.domElement.addEventListener('pointerup', function(e) {
+  if (!_planMode || !_picking || !_pickDragging) return;
+  _pickDragging = false;
+  _exitPicking(); // one-shot, matches nav2's pose-estimate/nav-goal tools
+});
+
+// ── Export ───────────────────────────────────────────────────────
+async function _exportMission() {
+  if (!missionDraft.robots.length) { _showNav('Add at least one robot first', true); return; }
+  try {
+    const res = await _apiFetch('/mission/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ robots: missionDraft.robots }),
+    });
+    if (!res.ok) {
+      const d = await res.json().catch(function() { return {}; });
+      _showNav('Export failed: ' + (d.detail || res.statusText), true);
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'mission.yaml';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    _showNav('mission.yaml downloaded');
+  } catch (err) { _showNav('Export error: ' + err.message, true); }
+}
+window._exportMission = _exportMission;
+
+// ── Launch (step 2) ─────────────────────────────────────────────
+// Doesn't run anything itself -- POSTs the draft + launch params to argOS,
+// which relays it to fleet_bridge.py (the ROS2-sourced process that
+// actually owns the coordinator_node subprocess). See main.py's
+// /mission/launch* endpoints for why this isn't a server-side launch.
+async function _launchMission() {
+  if (!missionDraft.robots.length) { _showNav('Add at least one robot first', true); return; }
+  const params = {
+    use_sim_time: document.getElementById('launch-sim-time').checked,
+    initial_pose_publish: document.getElementById('launch-initial-pose').checked,
+    spooky_map_id: document.getElementById('launch-map-id').value.trim(),
+  };
+  try {
+    const res = await _apiFetch('/mission/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ robots: missionDraft.robots, params: params }),
+    });
+    const d = await res.json().catch(function() { return {}; });
+    if (!res.ok) { _showNav('Launch failed: ' + (d.detail || res.statusText), true); return; }
+    _showNav('Mission launch requested');
+    pollMissionStatus();
+  } catch (err) { _showNav('Launch error: ' + err.message, true); }
+}
+window._launchMission = _launchMission;
+
+async function _stopMission() {
+  try {
+    const res = await _apiFetch('/mission/launch/stop', { method: 'POST' });
+    if (!res.ok) { _showNav('Stop failed', true); return; }
+    _showNav('Stop requested');
+  } catch (err) { _showNav('Stop error: ' + err.message, true); }
+}
+window._stopMission = _stopMission;
+
+async function pollMissionStatus() {
+  if (_pollingPaused) return;
+  try {
+    const d = await (await _apiFetch('/mission/launch/status')).json();
+    const el = document.getElementById('launch-status');
+    const launchBtn = document.getElementById('launch-btn');
+    const stopBtn = document.getElementById('stop-mission-btn');
+    if (!el || !launchBtn || !stopBtn) return;
+    const running = d.status === 'running' || d.status === 'starting';
+    el.className = d.status === 'running' ? 'running' : (d.status === 'error' ? 'error' : '');
+    let text = d.status || '';
+    if (d.pid !== undefined && d.pid !== null) text += ' (pid ' + d.pid + ')';
+    if (d.returncode !== undefined && d.returncode !== null) text += ' (exit ' + d.returncode + ')';
+    if (d.message) text += ' -- ' + d.message;
+    el.textContent = text;
+    launchBtn.disabled = running;
+    stopBtn.style.display = running ? '' : 'none';
+  } catch (e) {}
+}
+// Not called immediately here (unlike other pollX() functions) -- unlike
+// them, this one is defined before _pollingPaused exists yet (declared
+// much further down with the rest of the polling block), so an immediate
+// call here would read it in its temporal dead zone. setInterval's first
+// fire (2s out) is well after full script init, so it's not needed anyway.
+setInterval(pollMissionStatus, 2000);
 
 // ── LiDAR point cloud renderer ───────────────────────────────
 const lidarGeo = new THREE.BufferGeometry();
@@ -1386,6 +1978,8 @@ function _hmBuildTexture() {
     _hmMat = new THREE.MeshBasicMaterial({
       map: _hmTex, transparent: true, side: THREE.DoubleSide, depthWrite: false
     });
+    _hmMat.toneMapped = false; // same reasoning as the static map's mat.toneMapped above
+    _hmMat.fog = false;        // same reasoning as the static map's mat.fog above
   } else {
     _hmMat.map = _hmTex;
     _hmMat.needsUpdate = true;
@@ -1567,6 +2161,7 @@ function _fitRendererToPanel() {
   if (!w || !h) return;
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  if (_planMode) _frameCamera2DToMap();
   renderer.setSize(w, h, false);
   labelRenderer.setSize(w, h);
 }
@@ -1591,8 +2186,8 @@ new ResizeObserver(_fitRendererToPanel).observe(panel);
   }
   if (_activeGoal) goalMarker.rotation.z += 0.025;
 
-  renderer.render(scene, camera);
-  labelRenderer.render(scene, camera);
+  renderer.render(scene, activeCamera);
+  labelRenderer.render(scene, activeCamera);
 })();
 </script>
 

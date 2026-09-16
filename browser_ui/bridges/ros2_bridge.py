@@ -71,8 +71,20 @@ BRIDGE_PASSWORD = os.environ.get("BRIDGE_PASSWORD", "")
 class RobotConfig:
     """One robot's bridge-side parameters.
 
+    No separate `id` field -- `namespace` is used both as this robot's ROS2
+    namespace *and* as the `X-Robot-Id` argOS pushes under (so it's also
+    the mission-editor draft's robot id, and what ends up in an exported/
+    launched mission YAML's `id:` field). These used to be two separate
+    fields, but fleet_coordinator.coordinator_node publishes each robot's
+    seeded initial pose to `/{mission Robot.id}/initialpose` and looks up
+    its TF the same way -- so a mission robot's `id` *must* equal its real
+    ROS2 namespace or coordinator_node ends up talking to a namespace
+    nothing publishes on (silently: "frames in buffer: <none>", found the
+    hard way running an actual launch). Collapsing to one field makes that
+    mismatch impossible instead of just documenting it.
+
     `robot_radius`/`inflation` default to fleet_coordinator.robot.Robot's
-    own defaults (0.35 / 0.0) so a homogeneous fleet only needs id+namespace;
+    own defaults (0.35 / 0.0) so a homogeneous fleet only needs namespace;
     override per robot for a heterogeneous fleet, or when this bridge needs
     to hand these straight to Spooky later (see fleet-coordinator/robot.py).
     `urdf_path` is carried through for the browser's future 3D render --
@@ -88,7 +100,6 @@ class RobotConfig:
     of scope here -- see m-explore-ros2 for that, later.
     """
 
-    id: str
     namespace: str
     backend: str = "nav2"
     robot_radius: float = 0.35
@@ -102,11 +113,11 @@ class RobotConfig:
     def __post_init__(self) -> None:
         if self.backend not in BACKENDS:
             raise ValueError(
-                f"robot {self.id!r}: unknown backend {self.backend!r}, "
+                f"robot {self.namespace!r}: unknown backend {self.backend!r}, "
                 f"expected one of {sorted(BACKENDS)}"
             )
         if self.urdf_path and not Path(self.urdf_path).exists():
-            log.warning(f"[{self.id}] urdf_path does not exist: {self.urdf_path}")
+            log.warning(f"[{self.namespace}] urdf_path does not exist: {self.urdf_path}")
 
 
 def load_fleet_yaml(path: str | Path) -> tuple[dict, list[RobotConfig]]:
@@ -179,7 +190,7 @@ class RobotBridge:
         self._session = requests.Session()
         if BRIDGE_PASSWORD:
             self._session.headers["X-Bridge-Password"] = BRIDGE_PASSWORD
-        self._session.headers["X-Robot-Id"] = config.id
+        self._session.headers["X-Robot-Id"] = config.namespace
 
         # TransformListener always subscribes to the ABSOLUTE topics '/tf'
         # and '/tf_static' (hardcoded in tf2_ros -- this rclpy/tf2_ros
@@ -194,7 +205,7 @@ class RobotBridge:
         # this bringup actually publishes TF: per-robot under its own
         # namespace, not on one shared /tf.
         self.node = Node(
-            f"argos_bridge_{config.id}",
+            f"argos_bridge_{config.namespace}",
             namespace=config.namespace,
             cli_args=[
                 "--ros-args",
@@ -214,7 +225,7 @@ class RobotBridge:
             self.backend.path_msg_type(), path_topic, self._on_path, 10
         )
         log.info(
-            f"[{config.id}] backend={self.backend.name} ns={config.namespace} "
+            f"[{config.namespace}] backend={self.backend.name} ns={config.namespace} "
             f"pose<-TF(map->{config.base_frame}) path<-{path_topic}"
         )
 
@@ -229,10 +240,10 @@ class RobotBridge:
             )
             if not r.ok:
                 log.warning(
-                    f"[{self.config.id}] {endpoint} -> {r.status_code}: {r.text[:200]}"
+                    f"[{self.config.namespace}] {endpoint} -> {r.status_code}: {r.text[:200]}"
                 )
         except Exception as e:
-            log.warning(f"[{self.config.id}] push {endpoint} failed: {e}")
+            log.warning(f"[{self.config.namespace}] push {endpoint} failed: {e}")
 
     def _poll_pose(self) -> None:
         try:
@@ -248,7 +259,7 @@ class RobotBridge:
             return
         if not self._got_pose:
             self._got_pose = True
-            log.info(f"[{self.config.id}] first pose received")
+            log.info(f"[{self.config.namespace}] first pose received")
         now = time.time()
         if now - self._last_pose_push < self._pose_interval:
             return
@@ -278,7 +289,7 @@ class RobotBridge:
     def _on_path(self, msg) -> None:
         if not self._got_path:
             self._got_path = True
-            log.info(f"[{self.config.id}] first path received ({len(msg.poses)} poses)")
+            log.info(f"[{self.config.namespace}] first path received ({len(msg.poses)} poses)")
         # received_global_plan republishes at nav2_controller's control rate
         # (~20Hz) while a goal is active -- without this, every one of those
         # messages fired a blocking HTTP POST from this callback, which
@@ -413,7 +424,7 @@ class FleetSupervisor(Node):
         this URDF's TF tree / no initial pose set. Silence here otherwise
         looks identical to "everything's fine, just no data yet"."""
         self._startup_check_timer.cancel()
-        silent = [rb.config.id for rb in self.robot_bridges if not rb._got_pose]
+        silent = [rb.config.namespace for rb in self.robot_bridges if not rb._got_pose]
         if silent:
             log.warning(
                 f"no pose received yet for: {', '.join(silent)} -- check that "
@@ -454,13 +465,13 @@ def main():
         (rb for rb in robot_bridges if rb.config.map_source), robot_bridges[0]
     )
     map_bridge = MapBridge(
-        map_source.node, map_source.backend, cloud_url, map_source.config.id
+        map_source.node, map_source.backend, cloud_url, map_source.config.namespace
     )
 
     supervisor = FleetSupervisor(robot_bridges)
     log.info(
         f"cloud={cloud_url} pose_hz={pose_hz} path_hz={path_hz} "
-        f"robots={[r.id for r in robots]} map_source={map_source.config.id}"
+        f"robots={[r.namespace for r in robots]} map_source={map_source.config.namespace}"
     )
 
     # MultiThreadedExecutor hosting every robot's own node plus the

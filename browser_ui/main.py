@@ -19,6 +19,7 @@ import json
 import logging
 import zlib
 import uuid
+import yaml
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -37,6 +38,8 @@ from core.models import (
     IngestRequest, IngestResponse,
     QueryRequest, MapResponse,
     ErrorResponse, WorldState,
+    MissionExportRequest,
+    MissionLaunchRequest,
 )
 from core.world_store import WorldStateStore
 
@@ -52,6 +55,7 @@ POLL_ACCESS_LOG = os.environ.get("POLL_ACCESS_LOG", "false").lower() == "true"
 _NOISY_POLL_PATHS = (
     "/pose/live", "/pointcloud/live", "/path/live",
     "/costmap/live", "/goal/active", "/map", "/map/live",
+    "/mission/launch/status", "/mission/launch/command",
 )
 
 
@@ -902,6 +906,102 @@ async def ingest_map(request: Request, _: None = Depends(verify_bridge)):
 @app.get("/map/live")
 async def get_live_map(_tok: str = Depends(verify_session)):
     return _live_map or {}
+
+
+# ── Mission export (visual multi-robot mission planner) ───────
+# Turns the browser's in-progress mission draft (per-robot start/goal poses
+# set by clicking the map, see dashboard.html's Plan Mission mode) into a
+# real mission YAML -- field-for-field the shape fleet_coordinator.robot.
+# Fleet.from_yaml already expects (see fleet-coordinator/config/
+# mission.example.yaml), so this is authoring-time only: it hands back a
+# file for you to point `coordinator_node`'s `mission_file` param at
+# yourself. Actually *running* a mission (including seeding /initialpose
+# from each robot's declared start) stays entirely fleet-coordinator's job,
+# same as it already is today -- this doesn't add a second way to command
+# a robot, just a visual way to write the file.
+
+def _build_mission_yaml(robots: list, header: str) -> str:
+    specs = [r.model_dump() for r in robots]
+    return f"# {header}\n" + yaml.safe_dump(specs, sort_keys=False, default_flow_style=False)
+
+
+@app.post("/mission/export")
+async def export_mission(req: MissionExportRequest, _tok: str = Depends(verify_session)):
+    if not req.robots:
+        raise HTTPException(400, "mission draft has no robots")
+    yaml_text = _build_mission_yaml(req.robots, "Exported from argOS's Plan Mission mode")
+    return Response(
+        content=yaml_text,
+        media_type="application/x-yaml",
+        headers={"Content-Disposition": "attachment; filename=mission.yaml"},
+    )
+
+
+# ── Mission launch (executes coordinator_node, doesn't just export) ────
+# coordinator_node isn't wrapped as a server the way Spooky is -- Spooky's
+# job (plan-and-return) is a natural request/response fit; coordinator_
+# node's job is to own and drive a live mission for its full duration (TF,
+# release-gating, dispatch, deadlock checks), a supervised one-shot process,
+# not a stateless computation. So argOS doesn't launch anything itself
+# (still no ROS2 dependency here) -- it just relays a launch/stop command
+# to fleet_bridge.py, the ROS2-sourced process that actually owns the
+# coordinator_node subprocess (mirrors run_bridges.py's own spawn/monitor/
+# SIGTERM-then-SIGKILL pattern, plus process-group killing since `ros2 run`
+# can spawn children a plain terminate() would orphan), and stores whatever
+# status it reports back for the browser to poll.
+
+_mission_run: dict = {"status": "idle", "pid": None, "returncode": None, "message": None}
+_mission_command: dict | None = None  # consumed once by fleet_bridge.py's next poll
+
+
+@app.post("/mission/launch")
+async def launch_mission(req: MissionLaunchRequest, _tok: str = Depends(verify_session)):
+    global _mission_command
+    if _mission_run.get("status") in ("running", "starting"):
+        raise HTTPException(409, "a mission is already running -- stop it first")
+    if not req.robots:
+        raise HTTPException(400, "mission draft has no robots")
+    yaml_text = _build_mission_yaml(req.robots, "Launched from argOS's Plan Mission mode")
+    _mission_command = {
+        "action": "launch",
+        "yaml": yaml_text,
+        "params": req.params.model_dump(),
+    }
+    return {"status": "queued"}
+
+
+@app.post("/mission/launch/stop")
+async def stop_mission(_tok: str = Depends(verify_session)):
+    global _mission_command
+    _mission_command = {"action": "stop"}
+    return {"status": "stop requested"}
+
+
+@app.get("/mission/launch/command")
+async def get_mission_command(_: None = Depends(verify_bridge)):
+    global _mission_command
+    cmd = _mission_command or {"action": None}
+    _mission_command = None
+    return cmd
+
+
+@app.post("/mission/launch/status")
+async def post_mission_status(request: Request, _: None = Depends(verify_bridge)):
+    global _mission_run
+    body = await request.json()
+    _mission_run = {
+        "status": body.get("status", "unknown"),
+        "pid": body.get("pid"),
+        "returncode": body.get("returncode"),
+        "message": body.get("message"),
+        "timestamp": time.time(),
+    }
+    return {"ok": True}
+
+
+@app.get("/mission/launch/status")
+async def get_mission_status(_tok: str = Depends(verify_session)):
+    return _mission_run
 
 
 # ── Navigation — goal queue ───────────────────────────────────

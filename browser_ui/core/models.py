@@ -76,6 +76,48 @@ class QueryRequest(BaseModel):
     robot_id: Optional[str] = None  # optional: filter to specific robot
 
 
+class MissionPose(BaseModel):
+    """A robot's start or goal pose, matching fleet_coordinator.robot.Pose2D."""
+    x: float
+    y: float
+    theta: float = 0.0
+
+
+class MissionRobotSpec(BaseModel):
+    """One robot's entry in a mission draft — field-for-field the same shape
+    fleet_coordinator.robot.Robot / Fleet.from_yaml expects (see
+    fleet-coordinator/config/mission.example.yaml)."""
+    id: str
+    start: MissionPose
+    goal: MissionPose
+    start_time: int = 0
+    priority: float = 1.0
+    robot_radius: float = 0.35
+    inflation: float = 0.0
+    coordinate_format: str = "world"
+
+
+class MissionExportRequest(BaseModel):
+    """POST /mission/export — the browser's in-progress mission draft."""
+    robots: List[MissionRobotSpec]
+
+
+class MissionLaunchParams(BaseModel):
+    """Launch-time params that aren't part of the mission YAML itself —
+    coordinator_node's own --ros-args, not Robot/Fleet fields."""
+    use_sim_time: bool = True
+    spooky_map_id: str = ""
+    initial_pose_publish: bool = True
+
+
+class MissionLaunchRequest(BaseModel):
+    """POST /mission/launch — mission draft + launch params, relayed to
+    fleet_bridge.py (see bridges/fleet_bridge.py) which actually runs
+    coordinator_node. argOS never launches ROS2 processes itself."""
+    robots: List[MissionRobotSpec]
+    params: MissionLaunchParams = MissionLaunchParams()
+
+
 # ── API Response Models ───────────────────────────────────────
 
 
