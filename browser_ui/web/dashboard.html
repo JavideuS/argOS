@@ -707,6 +707,7 @@ window._mic = (function() {
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import URDFLoader from 'urdf-loader';
 
 // ── Renderer ──────────────────────────────────────────────────
@@ -1043,15 +1044,31 @@ function addLegendRow(id, color) {
   legend.classList.add('visible');
 }
 
-// urdf-loader's built-in defaultMeshLoader already handles both .stl and
-// .dae (this fleet's mesh formats) internally -- no custom loadMeshCb
-// needed. (An earlier custom override here was actively wrong: urdf-loader
-// calls loadMeshCb as (path, manager, material, done) -- 4 args -- but that
-// override only declared 3 params, so its "onComplete" was silently bound
-// to the *material* argument instead of the real completion callback.
-// Calling it as a function threw inside the loader's async mesh callback,
-// so the per-link load promise never resolved and nothing ever rendered.)
+// urdf-loader's built-in defaultMeshLoader handles .stl and .dae directly.
+// .glb/.gltf (used by compressed models -- see scripts/compress_robot_model.py)
+// need a manual GLTFLoader hookup, so we wrap the default rather than
+// replace it, falling back to it for every other extension.
+//
+// NOTE: urdf-loader calls loadMeshCb as (path, manager, material, done) --
+// 4 args. An earlier override here declared only 3 params, so its
+// "onComplete" was silently bound to the *material* argument instead of the
+// real completion callback; calling it as a function threw inside the
+// loader's async mesh callback and nothing ever rendered. Keep the 4-arg
+// signature exact if this is touched again.
 const urdfLoader = new URDFLoader();
+const defaultMeshLoader = urdfLoader.loadMeshCb.bind(urdfLoader);
+urdfLoader.loadMeshCb = (path, manager, material, done) => {
+  if (/\.(glb|gltf)$/i.test(path)) {
+    new GLTFLoader(manager).load(
+      path,
+      (gltf) => done(gltf.scene),
+      undefined,
+      (err) => done(null, err)
+    );
+  } else {
+    defaultMeshLoader(path, manager, material, done);
+  }
+};
 const fleetRobots = new Map(); // robot_id -> {grp, placeholder, color, urdfRoot, x, y, z, lastX, lastY, speed}
 
 function loadUrdfForRobot(id, modelName) {

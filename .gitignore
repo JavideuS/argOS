@@ -20,3 +20,8 @@ logs/
 *LOG*
 
 CLAUDE.md
+
+# Robot render models (URDF + meshes) -- large binaries, pulled from Hugging
+# Face on demand instead of committed. See scripts/hf_model_sync.py.
+browser_ui/static/models/*
+!browser_ui/static/models/README.md
